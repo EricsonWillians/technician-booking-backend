@@ -1,289 +1,212 @@
-# technician-booking-backend
-
-A FastAPI-based system to manage technician bookings, ensuring that time slots do not overlap for the same technician. This repository demonstrates an **in-memory** reference implementation suitable for prototyping or internal demos. You can easily replace the in-memory data store with a real database in production.
-
-## Table of Contents
-
-1. [Overview](#overview)  
-2. [Key Features](#key-features)  
-3. [Tech Stack](#tech-stack)  
-4. [Installation](#installation)  
-5. [Configuration](#configuration)  
-6. [Usage](#usage)  
-   - [CLI Usage](#cli-usage)  
-   - [API Usage](#api-usage)  
-7. [Project Structure](#project-structure)  
-8. [Examples](#examples)  
-9. [Contributing](#contributing)  
-10. [License](#license)
-
----
+# Technician Booking System — README
 
 ## Overview
 
-**technician-booking-backend** provides a platform to schedule, retrieve, and cancel technician appointments. It comes with:
+This repository contains the **Technician Booking System**, an **NLP-driven** backend for handling bookings (create, cancel, retrieve) with automated date/time parsing, entity recognition, and robust intent classification. The project demonstrates how a multi-pipeline architecture (Zero-Shot, NER, and optional date/time LLM) can form a cohesive solution for natural language–based scheduling and technician dispatch.
 
-- A **RESTful API** (FastAPI) that covers core CRUD operations.  
-- A **Natural Language (NLP/LLM) CLI** for end-users who prefer commands like “_I want to book an electrician for tomorrow_.”
+Developed as part of an **internal company assignment**, I've decided to open-source it for educational and demonstration purposes. The design supports **in-memory** storage by default but can be easily modified to use external databases such as **MongoDB** or **PostgreSQL** with **SQLAlchemy** integration.
 
-This project enforces:
+## Architecture
 
-1. **No overlapping bookings** for the same technician.  
-2. Each booking is **1 hour** long.  
-3. Basic **profession validation** (e.g., plumber, electrician, welder).  
-4. Optional **Rich-enhanced** terminal experience for colorful output.
+1. **Core CLI**  
+   - **`app/core/cli.py`** defines a Rich/typer-based command-line interface to interact with the booking logic.
+   - Presents user-friendly commands (e.g. “Book a plumber tomorrow at 2 PM,” “Show booking details for {id}”).
 
----
+2. **NLP Service**  
+   - **`app/services/nlp_service.py`** orchestrates **three** Hugging Face Transformers pipelines:
+     - **Zero-shot** classification → Intent detection
+     - **NER** (Named Entity Recognition) → Technician names, customer names, partial time tokens
+     - **Text2Text LLM** → More advanced date/time parsing (e.g. “Friday at 3pm,” “tomorrow,” “in 2 weeks”)
+   - Combines rule-based fallback with pipeline-based extraction.  
+   - Maps recognized “Create a booking,” “Retrieve booking details,” etc., to actual booking logic calls.
 
-## Key Features
+3. **Booking Services**  
+   - **`app/services/booking_service.py`** manages the booking CRUD operations (create, list, retrieve, cancel).
+   - Uses an **in-memory** Python dictionary for data storage by default. Switch out the logic to connect with an RDBMS like Postgres or a NoSQL store like MongoDB.
 
-- **FastAPI CRUD Endpoints** for bookings:  
-  - List all bookings  
-  - Retrieve a booking by ID  
-  - Create a booking (with time checks)  
-  - Delete a booking  
-- **NLP-based CLI** (Typer + Rich) to parse natural language commands such as:  
-  - _“I want to book a plumber for tomorrow”_  
-  - _“cancel booking 123”_  
-- **In-Memory Data Store** for quick demos and local testing.  
-- **Validation** of booking times and allowed professions.  
-- **One-Hour Slot** enforcement—end time is automatically calculated.  
+4. **Models & Schemas**  
+   - **`app/models/booking.py`** and **`app/schemas/booking.py`** define Pydantic data models.  
+   - **`BookingCreate`** is used on creation, while **`BookingResponse`** or an internal `Booking` object describes the fully stored data.
 
----
+5. **Settings & Environment**  
+   - **`app/config/settings.py`** loads environment variables (using [pydantic-settings](https://github.com/pydantic/pydantic-settings)) for model names, ports, and other system-wide defaults.
 
-## Tech Stack
+## Running Locally
 
-- **Python 3.10+**  
-- **FastAPI** for the web framework.  
-- **Typer + Rich** for CLI interactions.  
-- **Poetry** for dependency management.  
-- **Pydantic** for data validation.  
-- **Transformers** (optional) if using an NLP model (Hugging Face) for parsing.
-
----
-
-## Installation
-
-1. **Clone the Repository**  
-   ```bash
-   git clone https://github.com/your-organization/technician-booking-backend.git
-   cd technician-booking-backend
-   ```
-
-2. **Install Poetry** (if not already installed)  
-   ```bash
-   # For Linux/macOS:
-   curl -sSL https://install.python-poetry.org | python3 -
-   
-   # or check the Poetry docs for Windows options
-   ```
-
-3. **Install Dependencies**  
-   ```bash
-   poetry install
-   ```
-
-4. **Activate the Poetry Shell**  
-   ```bash
-   poetry shell
-   ```
-
-5. **Set up Environment Variables** (optional but recommended)  
-   - Copy `.env.example` to `.env` and fill in your values, for example:
-     ```bash
-     HUGGINGFACE_API_KEY=<YOUR_TOKEN_HERE>
-     MODEL_NAME="bert-base-uncased"
-     ```
-   - This helps manage secrets and environment-specific configurations.
-
----
-
-## Configuration
-
-- **`pyproject.toml`** handles all dependencies and project metadata.  
-- **`.env`** (not committed) stores sensitive credentials like `HUGGINGFACE_API_KEY`.  
-- **`app/config/settings.py`** loads environment variables via Pydantic `BaseSettings`.
-
----
-
-## Usage
-
-### CLI Usage
-
-Run the **interactive CLI** (with NLP-based commands):
-
+### 1. Clone and Install Dependencies
 ```bash
-poetry run python app/core/cli.py run
+git clone https://github.com/your-org/technician-booking-backend
+cd technician-booking-backend
+poetry install
 ```
+> Ensure you have [Poetry](https://python-poetry.org/docs/) installed for dependency management.
 
-You should see a Rich-enhanced interface. Examples of valid commands:
-
-1. **Create a booking (NLP example)**  
-   ```
-   I want to book an electrician for tomorrow
-   ```
-   Output might be:  
-   ```
-   Booking created successfully!
-   Booking ID: 7fefd8a2-8bbf-4183-9c2b-a6e4fd31dfaf
-   ```
-
-2. **Retrieve booking details**  
-   ```
-   what is my booking id?
-   ```
-   or  
-   ```
-   retrieve booking 7fefd8a2-8bbf-4183-9c2b-a6e4fd31dfaf
-   ```
-
-3. **Cancel a booking**  
-   ```
-   cancel booking 7fefd8a2-8bbf-4183-9c2b-a6e4fd31dfaf
-   ```
-
-4. **List all bookings**  
-   ```
-   list all bookings
-   ```
-
-5. **Quit**  
-   ```
-   quit
-   ```
-
-**Note**: The LLM commands are parsed by the placeholder function `parse_user_input` in `llm_processor.py`. You can integrate any Hugging Face or custom NLP model to handle user text more reliably.
-
----
-
-### API Usage
-
-Run the **FastAPI** server:
-
+### 2. Configure Environment Variables
+Create or modify `.env` in the root directory:
 ```bash
-poetry run uvicorn app.main:app --reload
+ENV=development
+LOG_LEVEL=DEBUG
+
+# Name or path for Hugging Face models
+ZERO_SHOT_MODEL_NAME=facebook/bart-large-mnli
+NER_MODEL_NAME=dbmdz/bert-large-cased-finetuned-conll03-english
+DATE_TIME_MODEL_NAME=google/flan-t5-large
+
+# If you want to override default huggingface cache, set:
+HF_CACHE_DIR=~/.cache/huggingface/hub/
+
+# GPU usage
+USE_GPU=True
 ```
+> You can specify custom model names for zero-shot, NER, date/time LLM. These run **locally** unless they are not cached and must be downloaded from Hugging Face.
 
-The application starts on `http://127.0.0.1:8000`.
-
-1. **List All Bookings**  
-   - **GET** `/bookings/`  
-   - Response: `[{ "id": "...", "customer_name": "...", ... }, ... ]`
-
-2. **Retrieve One Booking by ID**  
-   - **GET** `/bookings/{booking_id}`  
-   - Example: `GET /bookings/bdff5803-7c45-4fac-9848-234dfc36da06`
-
-3. **Create a Booking**  
-   - **POST** `/bookings/`  
-   - JSON body:
-     ```json
-     {
-       "customer_name": "Alice Johnson",
-       "technician_name": "Mark Roberts",
-       "profession": "Welder",
-       "start_time": "2024-01-15T14:00:00"
-     }
-     ```
-   - Returns a **201** status with the new booking info in JSON.
-
-4. **Delete a Booking**  
-   - **DELETE** `/bookings/{booking_id}`  
-   - Returns **204** on success or **404** if not found.
-
-You can explore all these endpoints via the **interactive docs** at:
-
+### 3. Launch the CLI
+```bash
+poetry run python -m app.core.cli
 ```
-http://127.0.0.1:8000/docs
+This starts an interactive REPL-like environment where you can type commands such as:
 ```
-
-or the ReDoc docs at:
-
-```
-http://127.0.0.1:8000/redoc
+Book a plumber for tomorrow at 2pm
+List all bookings
+Show booking details for {booking_id}
+Cancel booking {booking_id}
 ```
 
 ---
 
-## Project Structure
+## Booking Data Storage
+
+### In-Memory Storage
+
+The default `booking_service.py` uses a Python dictionary for storing Bookings:
+
+```python
+in_memory_bookings_db: Dict[str, Booking] = {}
+```
+This is ideal for **demonstration** or testing but **not** persistent once the application restarts.
+
+### Switching to MongoDB or PostgreSQL
+
+Replace or extend `booking_service.py` with your DB logic. For instance:
+
+- **SQLAlchemy** for Postgres:
+  ```python
+  from sqlalchemy.orm import Session
+  # ...
+  def create_booking(booking_data: BookingCreate, db: Session) -> Booking:
+      # insert into Postgres via SQLAlchemy
+      ...
+  ```
+- **PyMongo** for MongoDB:
+  ```python
+  from pymongo import MongoClient
+  # ...
+  db = MongoClient()["booking_database"]
+  def create_booking(booking_data: BookingCreate) -> Booking:
+      db.bookings.insert_one(booking_data.dict())
+      ...
+  ```
+
+The rest of the application logic remains the same, as the CLI calls the same `create_booking_from_llm(...)`, etc.
+
+---
+
+## Model Switching
+
+The following pipelines can be changed by adjusting environment variables in `.env`:
+
+- **ZERO_SHOT_MODEL_NAME**: e.g. `"facebook/bart-large-mnli"`, or any zero-shot classification model on Hugging Face.
+- **NER_MODEL_NAME**: e.g. `"dbmdz/bert-large-cased-finetuned-conll03-english"`, or your custom NER model.
+- **DATE_TIME_MODEL_NAME**: e.g. `"google/flan-t5-large"`, or a smaller/flan-t5-base if memory is a concern.
+
+The system automatically loads them via the `_init_pipeline_with_retry` method. If you prefer GPU usage, set `USE_GPU=True`.
+
+---
+
+## Project Folder Structure
 
 ```
 technician-booking-backend/
-├── app
-│   ├── config
-│   │   └── settings.py          # Loads env variables
-│   ├── core
-│   │   ├── cli.py               # CLI entry point
-│   │   └── initial_data.py      # Seeds initial data
-│   ├── main.py                  # FastAPI app factory & startup
-│   ├── models
-│   │   └── booking.py           # Dataclass domain model
-│   ├── routers
-│   │   └── bookings.py          # CRUD endpoints for bookings
-│   ├── schemas
-│   │   └── booking.py           # Pydantic schemas
-│   ├── services
-│   │   ├── booking_service.py   # Booking CRUD + validations & overlap checks
-│   │   └── validation.py        # Custom validation utilities
-│   └── utils
-│       └── llm_processor.py     # Placeholder NLP parser
-├── tests
-│   ├── integration
-│   │   └── test_api.py
-│   └── unit
-│       └── test_services.py
-├── pyproject.toml               # Poetry config & dependencies
-├── README.md
-└── .env.example                 # Example env file
+├── app/
+│   ├── config/
+│   │   └── settings.py
+│   ├── core/
+│   │   ├── cli.py          # CLI for user interactions
+│   │   └── initial_data.py # Optional initial data load
+│   ├── models/
+│   │   └── booking.py      # Domain model or DB model
+│   ├── schemas/
+│   │   └── booking.py      # Pydantic schemas for requests/responses
+│   ├── services/
+│   │   ├── booking_service.py # In-memory CRUD logic
+│   │   └── nlp_service.py     # Orchestrates 3 Hugging Face pipelines
+│   └── utils/                # Additional utility modules if needed
+├── tests/                     # Unit tests
+├── poetry.lock
+├── pyproject.toml             # Poetry config (Dependencies listed)
+└── README.md                  # This file
 ```
 
 ---
 
-## Examples
+## Running the CLI
 
-**Creating a Booking via API**  
+Inside the repo:
+
 ```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"customer_name": "Bob", "technician_name": "James", "profession": "Plumber", "start_time": "2025-02-10T10:00:00"}' \
-  http://127.0.0.1:8000/bookings/
+poetry run python -m app.core.cli
 ```
-Response:
-```json
-{
-  "id": "efa1b6ba-983e-4aaa-8500-5fcdbf45aef9",
-  "customer_name": "Bob",
-  "technician_name": "James",
-  "profession": "Plumber",
-  "start_time": "2025-02-10T10:00:00",
-  "end_time": "2025-02-10T11:00:00"
-}
+You should see:
+
+```
+╭──────────────────────────────────────────────────────────────────────────────── Technician Booking System ─────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                                                            │
+│  Welcome to the Technician Booking System                                                                                                                                                  │
+│                                                                                                                                                                                            │
+│  Available Commands:                                                                                                                                                                       │
+│  └─ Book a service:                                                                                                                                                                        │
+│     • Book a plumber for tomorrow at 2pm                                                                                                                                                   │
+│     • Book an electrician named John for next Monday                                                                                                                                       │
+│  └─ Manage bookings:                                                                                                                                                                       │
+│     • Show booking details for {booking_id}                                                                                                                                                │
+│     • Cancel booking {booking_id}                                                                                                                                                          │
+│     • List all bookings                                                                                                                                                                    │
+│                                                                                                                                                                                            │
+│  Type 'quit', 'exit', or 'q' to stop.                                                                                                                                                      │
+│                                                                                                                                                                                            │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Enter command:
+```
+**Start** typing commands, e.g.:
+
+```
+Book a gardener for next friday at 1pm
+Show booking details for b56a726a-4ec2-4681-8fd4-b51ff2c19c19
+List all bookings
+Cancel booking b56a726a-4ec2-4681-8fd4-b51ff2c19c19
 ```
 
-**CLI “Natural Language” Command**  
-```
-> "I want to book a plumber for tomorrow"
-
-[CLI Response]
-Booking created successfully!
-Booking ID: 7c1af07e-ecdf-4a0b-90f4-edae3a76d402
-```
+The system will parse your command, create or retrieve bookings from the in-memory store, and display the results nicely in a Rich-formatted panel or table.
 
 ---
 
-## Contributing
+## Further Notes
 
-1. **Fork** the repo and create a new branch:  
-   ```bash
-   git checkout -b feature/my-new-feature
-   ```  
-2. **Make Your Changes** with appropriate tests.  
-3. **Open a Pull Request** describing your changes thoroughly.
-
-We appreciate suggestions, bug reports, and improvements to make this project more robust and developer-friendly.
+- **Assignment Origin**: This project began as an internal company assignment exploring advanced NLP pipelines. I'm sharing it as an educational resource.
+- **Open-Source**: Licensed under the MIT License for wide usage and adaptation.
+- **Additional Tools**:
+  - `pytest` for unit testing.
+  - `mypy`, `black`, `flake8`, `isort` for code quality & formatting.
+- **Production Considerations**:
+  1. Switch in-memory DB to a real database.
+  2. Possibly wrap the CLI in a web server (FastAPI) for a multi-user environment.
+  3. Performance tune or reduce large model usage if you scale to high concurrency.
 
 ---
 
-## License
+## Conclusion
 
-This project is licensed under the **MIT License**. See the [LICENSE](./LICENSE) file for details.
+This **Technician Booking Backend** exemplifies a robust approach to **NLP-driven** scheduling, from ephemeral storage to advanced “text2text” date/time logic. It’s **highly customizable** via environment variables, allowing easy swapping of **Hugging Face** models or DB solutions. We hope it serves as both a reference and a stepping stone for real-world, intelligent booking systems.
+
+Feel free to contribute or adapt to your environment—**pull requests** are welcome!

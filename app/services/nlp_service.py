@@ -251,12 +251,34 @@ class NLPService:
         text_lower = text.lower()
         # Very simple rules to short-circuit
         intent_patterns = {
-            "Cancel a booking": [r"cancel.*booking", r"remove.*booking", r"delete.*booking"],
-            "List all bookings": [r"list.*booking", r"show.*booking", r"view.*booking"],
-            "Retrieve booking details": [r"get.*details.*booking", r"find.*booking", r"retrieve.*booking"],
-            "Create a booking": [r"book.*(?:plumber|electrician|technician)",
-                                 r"schedule.*(?:plumber|electrician|technician)",
-                                 r"need.*(?:plumber|electrician|technician)"]
+            "Cancel a booking": [
+                # e.g., "I want to cancel my booking", "Cancel booking", "Please remove my reservation"
+                r"(?i)\b(?:cancel|remove|delete|terminate|abort|discard|void)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
+                # e.g., "I need to undo my booking", "Revoke reservation"
+                r"(?i)\b(?:undo|revoke)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
+                # e.g., "Cancel my booking for tomorrow", "Delete booking on Friday"
+                r"(?i)\b(?:cancel|remove|delete|terminate|abort|discard|void)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\s+(?:for\s+.+)$"
+            ],
+            "List all bookings": [
+                # e.g., "List my bookings", "Show all reservations", "Display my appointments"
+                r"(?i)\b(?:list|show|display|view|see|get|fetch|present|give\s+me)\s+(?:all\s+)?(?:my\s+)?(?:bookings|reservations|appointments|schedules|sessions)\b",
+                # e.g., "Can you list my bookings?", "Please show all reservations"
+                r"(?i)\b(?:can\s+you\s+|please\s+)?(?:list|show|display|view|see|get|fetch|present|give\s+me)\s+(?:all\s+)?(?:my\s+)?(?:bookings|reservations|appointments|schedules|sessions)\b"
+            ],
+            "Retrieve booking details": [
+                # e.g., "Get details of my booking", "Find my reservation", "Retrieve appointment information"
+                r"(?i)\b(?:get|find|retrieve|access|look\s+up)\s+(?:the\s+)?(?:details\s+of\s+)?(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
+                # e.g., "Can you get booking details for me?", "Retrieve my reservation information"
+                r"(?i)\b(?:can\s+you\s+)?(?:get|find|retrieve|access|look\s+up)\s+(?:the\s+)?(?:details\s+of\s+)?(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b"
+            ],
+            "Create a booking": [
+                # e.g., "I want to book a plumber", "Schedule an electrician", "Need a technician"
+                r"(?i)\b(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\b",
+                # e.g., "Can you book a plumber for me?", "Please schedule an electrician"
+                r"(?i)\b(?:can\s+you\s+|please\s+)?(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\b",
+                # e.g., "I need to book a technician tomorrow", "Schedule a plumber on Monday"
+                r"(?i)\b(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\s+(?:for\s+.+)$"
+            ]
         }
         for intent_label, patterns in intent_patterns.items():
             for pat in patterns:
@@ -294,98 +316,152 @@ class NLPService:
 
     def _extract_entities(self, text: str) -> Dict[str, Any]:
         """
-        Extract structured entities (booking ID, technician name, customer name, start_time, etc.)
-        from raw user input. The workflow:
+        Extract high-level booking-related entities (Booking ID, Technician Name, 
+        Customer Name, Time, Profession, etc.) from a raw user command. 
 
-        1. **Extract Booking ID**:
-        - Uses a regex search for known booking ID patterns (e.g., "booking 123" or "id 999").
-        
-        2. **Run NER Pipeline**:
-        - Identifies tokens labeled as TIME, PROFESSION, PER, ORG, LOC, etc.
-        - Aggregates technician vs. customer names using the ' for ' pivot.
-        - Collects all TIME tokens for potential merging.
+        This function is central to the Technician Booking System's 
+        natural language processing workflow. It processes incoming 
+        text (e.g., "I want to book a gardener for tomorrow") and 
+        produces structured information needed to create or manage 
+        a booking.
 
-        3. **Merge & Parse Time Tokens**:
-        - Joins tokens like ["Friday", "3", "PM"] → "Friday 3 PM".
-        - Sends this merged time expression to `_assign_time(...)`, which calls either:
-            • The date/time LLM (if configured) → returns an ISO string → parse → final datetime, or
-            • The local `_parse_time(...)` fallback if LLM fails or is not set.
+        Business Rationale:
+        -------------------
+        1. **Identify the Customer & Technician**:
+        - Determines who is booking (customer_name) and which technician 
+            is requested (technician_name), supporting personalized 
+            interactions and recordkeeping.
+        2. **Determine Time Expressions**:
+        - Accurately captures the user's intended scheduling time 
+            (start_time), facilitating timely bookings and 
+            preventing misunderstandings about "tomorrow," 
+            "Friday at 3 PM," etc.
+        3. **Associate Booking IDs**:
+        - Enables direct references to existing appointments (e.g. 
+            "cancel booking 123") by extracting numerical booking IDs.
+        4. **Detect Profession**:
+        - Infers the requested technician's specialization (e.g., 
+            "plumber," "gardener") to streamline service matching.
 
-        4. **Fallback Checks** (if no 'start_time'):
-        - Example: "tomorrow at 2pm" via a simple regex.
-        - Optionally: day-of-week + hour patterns if needed.
+        Data Flow Summary:
+        ------------------
+        1. **Extract Booking ID**: 
+        - Searches for patterns like "booking 123" or "#456" 
+            to recognize references to specific reservations.
+
+        2. **Named Entity Recognition** (NER):
+        - Leverages a trained pipeline to label tokens as TIME, 
+            PROFESSION, PER, ORG, LOC, etc.
+        - Collects partial information on names (technician vs. 
+            customer via the " for " keyword), times, and 
+            profession references.
+
+        3. **Time/Date Token Merging**:
+        - Aggregates consecutive TIME tokens (e.g., ["Friday", "3", "PM"]) 
+            into one expression ("Friday 3 PM"), then attempts to parse 
+            it as a future booking time.
+
+        4. **Fallback Parsing**:
+        - If no time was captured, checks common patterns:
+            - "tomorrow at 2pm"
+            - "tomorrow" (alone) → default hour
+            - "friday at 3 pm" (day-of-week + time)
+        - Ensures the user-specified date is recognized even if NER 
+            didn't handle it.
+
+        5. **Assign Entities**:
+        - Synthesizes a final dictionary of extracted fields, 
+            enabling the booking logic to create or manage 
+            reservations seamlessly.
 
         Args:
-            text (str): Raw user input, e.g. "Book plumber Mike Davis for me on Friday at 3 PM."
+        -----
+            text (str):
+                Raw user input containing instructions about 
+                bookings, dates/times, technician requirements, etc.
 
         Returns:
-            Dict[str, Any]: Entities such as:
-                {
-                "booking_id": "123",
-                "technician_name": "Mike Davis",
-                "customer_name": "Jane Smith",
-                "profession": "plumber",
-                "start_time": datetime(...),
-                ...
-                }
+        --------
+            Dict[str, Any]:
+                A dictionary of recognized entities, potentially including:
+                
+                - "booking_id":     str or None
+                - "technician_name": str
+                - "customer_name":   str
+                - "profession":     str (e.g., "gardener")
+                - "start_time":     datetime (the intended booking time)
+        
+        Raises:
+        -------
+            None explicitly here, though sub-calls may raise `ValueError` 
+            if time parsing fails. The function logs warnings if 
+            pipelines are unavailable.
+
+        Usage Example:
+        --------------
+            >>> text_cmd = "I want to book a gardener for tomorrow"
+            >>> entities = self._extract_entities(text_cmd)
+            >>> print(entities)
+            {
+            "booking_id": None,
+            "customer_name": "Anonymous", 
+            "technician_name": None, 
+            "profession": "gardener",
+            "start_time": datetime.datetime(2025, 1, 30, 9, 0)
+            }
+
+        Overall, this function ensures that the unstructured text from 
+        users or clients is converted into the structured information 
+        needed by our booking services. It is the backbone of the 
+        Technician Booking System's natural language layer.
         """
 
         entities: Dict[str, Any] = {}
 
-        # ---------------------------------------------------------------------
-        # 1) Attempt to find a booking ID (e.g., "booking 123" or "#123").
-        # ---------------------------------------------------------------------
+        # 1) Attempt to find a booking ID (e.g., "booking 123" or "#456").
         booking_id = self._extract_booking_id(text)
         if booking_id:
             entities["booking_id"] = booking_id
 
-        # ---------------------------------------------------------------------
-        # 2) Run NER pipeline for names, times, etc. 
-        #    If none, just return what we have so far.
-        # ---------------------------------------------------------------------
+        # 2) Run the NER pipeline for name/time detection.
         if self.ner_pipeline is None:
-            logger.warning("No NER pipeline available; cannot extract names/times.")
+            logger.warning("No NER pipeline detected. Limited entity extraction.")
             return entities
 
         ner_results = self.ner_pipeline(text)
         text_lower = text.lower()
         for_index = text_lower.find(" for ")
 
-        # We'll store partial results:
-        tech_names: List[str] = []
-        cust_names: List[str] = []
-        time_tokens: List[str] = []
+        # Prepare arrays to collate partial data
+        tech_names, cust_names, time_tokens = [], [], []
 
         for item in ner_results:
-            entity_group = item["entity_group"]
+            group = item["entity_group"]
             word = item["word"]
             start_idx = item["start"]
 
-            # 2a) TIME tokens
-            if entity_group == "TIME":
-                # Collect for potential merging (e.g. "Friday" + "3" + "PM").
+            # Gather tokens labeled as TIME
+            if group == "TIME":
                 time_tokens.append(word)
 
-            # 2b) PROFESSIONS (plumber, electrician, etc.)
-            elif entity_group == "PROFESSION":
-                # In practice, you might only store the first or prefer certain scorings.
+            # Occupation references
+            elif group == "PROFESSION":
                 entities["profession"] = word.lower()
 
-            # 2c) PERSON NAMES
-            elif entity_group == "PER":
-                # If after the ' for ' substring => customer, else technician.
+            # People (technician or customer)
+            elif group == "PER":
+                # Decide if after " for " => customer
                 if for_index != -1 and start_idx > for_index:
                     cust_names.append(word)
                 else:
                     tech_names.append(word)
 
-            # 2d) LOC / ORG fallback -> treat as names if capitalized 
-            elif entity_group in ("LOC", "ORG"):
-                if word.istitle():
-                    if for_index != -1 and start_idx > for_index:
-                        cust_names.append(word)
-                    else:
-                        tech_names.append(word)
+            # Fallback for ORG/LOC if capitalized => potential name
+            elif group in ("LOC", "ORG") and word.istitle():
+                if for_index != -1 and start_idx > for_index:
+                    cust_names.append(word)
+                else:
+                    tech_names.append(word)
 
         # Aggregate multi-token names
         if tech_names:
@@ -393,27 +469,27 @@ class NLPService:
         if cust_names:
             entities["customer_name"] = " ".join(cust_names)
 
-        # ---------------------------------------------------------------------
-        # 3) Merge & parse time tokens. 
-        #    Example: ["Friday", "3", "PM"] => "Friday 3 PM"
-        # ---------------------------------------------------------------------
+        # 3) Merge time tokens => single expression & parse
         if time_tokens:
-            merged_time_expr = " ".join(time_tokens)
-            logger.debug(f"Merged time tokens => '{merged_time_expr}'")
-            self._assign_time(merged_time_expr, entities)
+            merged_time = " ".join(time_tokens)
+            logger.debug(f"Merged time tokens => '{merged_time}'")
+            self._assign_time(merged_time, entities)
 
-        # ---------------------------------------------------------------------
-        # 4) If no 'start_time' found, do additional fallback checks:
-        #    Example: "tomorrow at 2pm"
-        # ---------------------------------------------------------------------
+        # 4) Fallback for "tomorrow at X pm"
         if "start_time" not in entities:
             tomorrow_match = re.search(r"\btomorrow at \d{1,2}(?:am|pm)\b", text_lower)
             if tomorrow_match:
                 snippet = tomorrow_match.group(0)
                 self._assign_time(snippet, entities)
 
-        # Example: further fallback for "friday at 3pm" 
-        # If STILL no start_time, we can forcibly parse day-of-week + time from text:
+        # Additional fallback for "tomorrow" alone
+        if "start_time" not in entities:
+            if re.search(r"\btomorrow\b", text_lower):
+                snippet = "tomorrow at 9am"  # default hour if user omitted any time
+                logger.debug(f"No explicit hour with 'tomorrow'; defaulting to '{snippet}'")
+                self._assign_time(snippet, entities)
+
+        # Day-of-week fallback (e.g. "friday at 3 pm")
         if "start_time" not in entities:
             day_time_match = re.search(
                 r"\b(mon|tue|wed|thu|fri|sat|sun)\w*\s+at\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b",
@@ -424,23 +500,27 @@ class NLPService:
                 logger.debug(f"Day-of-week fallback snippet => '{snippet}'")
                 self._assign_time(snippet, entities)
 
-        # Optional: final LLM fallback on entire text if STILL no 'start_time'
-        # if "start_time" not in entities and self.date_time_llm:
-        #     try:
-        #         logger.debug("No time found; passing entire text to LLM fallback.")
-        #         iso_str = self._interpret_datetime_with_llm(text)
-        #         dt_val = datetime.strptime(iso_str, "%Y-%m-%d %H:%M")
-        #         if dt_val < datetime.now():
-        #             dt_val += timedelta(days=7)
-        #         entities["start_time"] = dt_val
-        #     except Exception as e:
-        #         logger.warning(f"LLM fallback on full text failed: {e}")
-
         logger.debug(f"Final extracted entities: {entities}")
         return entities
 
     def _extract_booking_id(self, text: str) -> Optional[str]:
-        """Look for numeric booking IDs or references."""
+        """
+        Extract booking ID from the text.
+
+        1) Try matching UUIDs (e.g. 'b56a726a-4ec2-4681-8fd4-b51ff2c19c19').
+        2) Fall back to numeric patterns (e.g., 'booking 123').
+        3) If still not found, check if user typed 'cancel ...', 'retrieve ...', etc. 
+        and forcibly parse any standalone number.
+        """
+        text_lower = text.lower()
+
+        # 1) Match typical UUID
+        uuid_pattern = r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+        match_uuid = re.search(uuid_pattern, text, re.IGNORECASE)
+        if match_uuid:
+            return match_uuid.group(0)  # entire UUID
+
+        # 2) Additional numeric patterns
         patterns = [
             r"booking\s*#?\s*(\d+)",
             r"id\s*#?\s*(\d+)",
@@ -452,12 +532,12 @@ class NLPService:
             if m:
                 return m.group(1)
 
-        # If we see "cancel booking ####"
-        lower = text.lower()
-        if any(k in lower for k in ["cancel", "booking", "retrieve", "find"]):
+        # 3) If user said e.g. "retrieve booking 123", forcibly parse any standalone number
+        if any(k in text_lower for k in ["cancel", "booking", "retrieve", "find", "details"]):
             m2 = re.search(r"\b(\d+)\b", text)
             if m2:
                 return m2.group(1)
+
         return None
 
     # -------------------------------------------------------------------------

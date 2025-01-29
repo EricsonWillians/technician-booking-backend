@@ -65,10 +65,22 @@ if not logger.hasHandlers():
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-def create_styled_panel(content: str, title: str, style: str = "info") -> Panel:
-    """Create a consistently styled panel with proper padding and borders."""
+def create_styled_panel(content: Any, title: str, style: str = "info") -> Panel:
+    """
+    Create a consistently styled Rich Panel containing either a string or a Rich Text object.
+    
+    If content is already a Rich Text, we use it directly.
+    Otherwise, we convert content to a new Text(...).
+    """
+    if isinstance(content, Text):
+        # It's already a Rich Text object; just use it as is
+        content_text = content
+    else:
+        # Convert plain string (or other objects) to Rich Text
+        content_text = Text(str(content), justify="left")
+
     return Panel(
-        Padding(Text(content, justify="left"), (1, 2)),
+        Padding(content_text, (1, 2)),
         title=f"[{style} bold]{title}[/{style} bold]",
         border_style=style,
         padding=(1, 2),
