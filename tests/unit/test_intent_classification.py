@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from app.utils.llm_processor import llm_processor
+from app.services.nlp_service import llm_processor
 
 class TestIntentClassification(unittest.TestCase):
     def test_create_booking_intent(self):

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     NER_MODEL_NAME: str = Field(
         "dbmdz/bert-large-cased-finetuned-conll03-english", env="NER_MODEL_NAME"
     )
+    DATE_TIME_MODEL_NAME: str = Field(
+        "google/flan-t5-large", env="DATE_TIME_MODEL_NAME"
+    )
     USE_GPU: bool = Field(True, env="USE_GPU")
     USE_HALF_PRECISION: bool = Field(False, env="USE_HALF_PRECISION")
     MIN_INPUT_LENGTH: int = Field(3, env="MIN_INPUT_LENGTH")

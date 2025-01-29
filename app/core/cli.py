@@ -19,7 +19,7 @@ from rich.style import Style
 from rich.padding import Padding
 from typing import Callable, Optional, Dict, Any
 
-from app.utils.llm_processor import llm_processor, LLMProcessor
+from app.services.nlp_service import llm_processor, NLPService
 from app.core import initial_data
 from app.services import booking_service
 from app.schemas.booking import BookingCreate
@@ -172,7 +172,7 @@ def display_warning_message(message: str, title: str = "Warning"):
     )
     console.print(panel)
 
-def handle_booking_creation(processor: LLMProcessor, command: str):
+def handle_booking_creation(processor: NLPService, command: str):
     """Handle booking creation with enhanced visual feedback."""
     try:
         logger.debug(f"Processing booking creation: {command}")
@@ -210,7 +210,7 @@ def handle_booking_creation(processor: LLMProcessor, command: str):
         display_error_message(f"Unexpected error: {str(e)}")
         logger.exception("Booking creation failed")
 
-def handle_cancel_booking(processor: LLMProcessor, command: str):
+def handle_cancel_booking(processor: NLPService, command: str):
     """Handle booking cancellation with enhanced visual feedback."""
     try:
         logger.debug(f"Processing cancellation request: {command}")
@@ -238,7 +238,7 @@ def handle_cancel_booking(processor: LLMProcessor, command: str):
         display_error_message(f"Failed to cancel booking: {str(e)}")
         logger.exception("Booking cancellation failed")
 
-def handle_retrieve_booking(processor: LLMProcessor, command: str):
+def handle_retrieve_booking(processor: NLPService, command: str):
     """Handle booking retrieval with enhanced visual feedback."""
     try:
         logger.debug(f"Processing retrieval request: {command}")
@@ -327,12 +327,12 @@ def handle_unknown_command(command: str):
     )
     logger.warning(f"Unknown command received: {command}")
 
-def handle_command(processor: LLMProcessor, command: str):
+def handle_command(processor: NLPService, command: str):
     """
     Processes user commands by routing to appropriate handlers based on intent.
 
     Args:
-        processor (LLMProcessor): The LLMProcessor instance.
+        processor (NLPService): The NLPService instance.
         command (str): The user command input.
     """
     try:
@@ -353,7 +353,7 @@ def handle_command(processor: LLMProcessor, command: str):
         console.print(f"[bold red]Error processing command:[/bold red] {str(e)}")
         logger.exception(f"Error processing command '{command}': {e}")
 
-def initialize_processor() -> LLMProcessor:
+def initialize_processor() -> NLPService:
     """Initialize the language processor with error handling."""
     try:
         logger.info("Initializing language processor...")
