@@ -7,6 +7,7 @@ and structure for both API interactions and internal service operations.
 
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
+from app.config.settings import settings
 
 
 class BookingBase(BaseModel):
@@ -38,17 +39,23 @@ class BookingBase(BaseModel):
 
     @field_validator('profession')
     def validate_profession(cls, v):
-        """Ensure profession is one of the supported types."""
-        allowed = {'Plumber', 'Electrician', 'Welder'}
-        if v not in allowed:
-            raise ValueError(f"Profession must be one of: {', '.join(allowed)}")
-        return v
+        """
+        Validate that the profession is supported by checking against
+        the professions defined in application settings.
+        """
+        allowed_professions = {prof.title() for prof in settings.PROFESSION_KEYWORDS.keys()}
+        normalized_profession = v.title()  # Handle case-sensitivity
+        
+        if normalized_profession not in allowed_professions:
+            raise ValueError(
+                f"Profession must be one of: {', '.join(sorted(allowed_professions))}"
+            )
+        return normalized_profession
 
 
 class BookingCreate(BookingBase):
     """
     Schema for creating new bookings.
-    
     Used by both the API and internal service layer for booking creation.
     """
     class Config:
@@ -65,7 +72,6 @@ class BookingCreate(BookingBase):
 class BookingResponse(BookingBase):
     """
     Schema for booking responses.
-    
     Extends the base schema with system-generated fields.
     """
     id: str = Field(

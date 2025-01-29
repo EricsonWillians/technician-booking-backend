@@ -63,6 +63,10 @@ class Settings(BaseSettings):
                 "sink", "bathroom", "water heater", "pipe fitting", "plumbing repair",
                 "shower", "valve", "overflow", "gutter", "trap", "sealant"
             ],
+            "welder": [
+                "welder", "welding", "metal work", "fabrication", "steel", "iron",
+                "metalworking", "soldering", "brazing", "metal joining", "metallurgy"
+            ],
             "electrician": [
                 "electrician", "electric", "wiring", "circuit", "voltage", "current",
                 "breaker", "switch", "outlet", "fuse", "electrical panel", "power supply",
