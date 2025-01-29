@@ -126,25 +126,43 @@ The system automatically loads them via the `_init_pipeline_with_retry` method. 
 ## Project Folder Structure
 
 ```
-technician-booking-backend/
-├── app/
-│   ├── config/
+.
+├── app
+│   ├── config
+│   │   ├── __init__.py
 │   │   └── settings.py
-│   ├── core/
-│   │   ├── cli.py          # CLI for user interactions
-│   │   └── initial_data.py # Optional initial data load
-│   ├── models/
-│   │   └── booking.py      # Domain model or DB model
-│   ├── schemas/
-│   │   └── booking.py      # Pydantic schemas for requests/responses
-│   ├── services/
-│   │   ├── booking_service.py # In-memory CRUD logic
-│   │   └── nlp_service.py     # Orchestrates 3 Hugging Face pipelines
-│   └── utils/                # Additional utility modules if needed
-├── tests/                     # Unit tests
+│   ├── core
+│   │   ├── cli.py
+│   │   ├── initial_data.py
+│   │   └── __init__.py
+│   ├── __init__.py
+│   ├── main.py
+│   ├── models
+│   │   ├── booking.py
+│   │   └── __init__.py
+│   ├── routers
+│   │   ├── bookings.py
+│   │   └── __init__.py
+│   ├── schemas
+│   │   ├── booking.py
+│   │   └── __init__.py
+│   ├── services
+│   │   ├── booking_service.py
+│   │   ├── __init__.py
+│   │   ├── nlp_service.py
+│   │   └── validation.py
+│   └── utils
+│       └── __init__.py
+├── init_project.sh
+├── LICENSE
 ├── poetry.lock
-├── pyproject.toml             # Poetry config (Dependencies listed)
-└── README.md                  # This file
+├── pyproject.toml
+├── README.md
+└── tests
+    ├── __init__.py
+    └── unit
+        ├── __init__.py
+        └── test_intent_classification.py      
 ```
 
 ---
@@ -190,6 +208,187 @@ Cancel booking b56a726a-4ec2-4681-8fd4-b51ff2c19c19
 The system will parse your command, create or retrieve bookings from the in-memory store, and display the results nicely in a Rich-formatted panel or table.
 
 ---
+
+## FastAPI HTTP API
+
+In addition to the CLI, the Technician Booking System can be run as a **FastAPI** web service, exposing booking operations via REST endpoints.
+
+### **1. Running the FastAPI App**
+
+1. **Ensure dependencies installed** (see general instructions above):
+   ```bash
+   poetry install
+   ```
+2. **Launch** the FastAPI server (using Uvicorn) from the project root:
+   ```bash
+   poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+3. **Access** the HTTP API in your browser or via tools like `curl`, Postman, or httpie:
+   - **Base URL**: `http://localhost:8000`
+
+### **2. Available Endpoints**
+
+The main routes live in **`app.routers.bookings`**, which are included under `"/bookings"`. Summaries:
+
+1. **GET** `/<base>/bookings`  
+   - **List** all bookings in memory.
+   - Returns an array of booking objects or empty array `[]`.
+
+2. **GET** `/<base>/bookings/{booking_id}`  
+   - **Retrieve** a single booking by its unique ID (UUID or numeric).
+   - Returns `404 Not Found` if the booking does not exist.
+
+3. **POST** `/<base>/bookings`  
+   - **Create** a new booking from JSON data matching `BookingCreate`.
+   - Returns a `BookingResponse` with `201 Created` on success, `400 Bad Request` if validation fails.
+
+4. **DELETE** `/<base>/bookings/{booking_id}`  
+   - **Cancel** or remove a booking by its ID.
+   - Returns `204 No Content` if the booking was deleted, or `404` if not found.
+
+> These endpoints map directly to the logic in `booking_service.py` (in-memory by default, but easily adapted to databases).
+
+### **3. Exploring the API Documentation**
+
+FastAPI automatically generates **OpenAPI** documentation, accessible via your browser:
+
+- **Swagger UI**:  
+  ```
+  http://localhost:8000/docs
+  ```
+  Graphical interface to test each endpoint (list bookings, create a booking, etc.).
+
+- **ReDoc**:  
+  ```
+  http://localhost:8000/redoc
+  ```
+  Alternative documentation with a clean, single-page design.
+
+Here you’ll see:
+
+- **Schema definitions** for `BookingCreate` & `BookingResponse`.
+- **Endpoint** descriptions (HTTP methods, request/response bodies).
+- **Example calls** and standard error codes (400, 404, 500).
+
+### **4. Customizing for Production**
+
+1. **Database**:
+   - Replace or augment the **in-memory** logic in `booking_service.py` with real DB connectors (MongoDB, PostgreSQL).
+   - Keep the same endpoints—only the backend storage changes.
+
+2. **Authentication / Authorization**:
+   - Add FastAPI dependencies (e.g. `fastapi-security` or OAuth2) if you need secure endpoints.
+
+3. **Deployment**:
+   - Containerize with Docker or deploy to cloud providers (e.g., AWS, Azure) using standard FastAPI best practices.
+
+---
+
+## **cURL Examples**
+
+### 1. **List All Bookings**
+```bash
+curl -X GET http://127.0.0.1:8000/bookings/ \
+     -H "Accept: application/json"
+```
+**Response (HTTP 200):**
+```json
+[
+  {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "customer_name": "John Doe",
+    "technician_name": "Alice Tech",
+    "profession": "Plumber",
+    "start_time": "2025-01-30T10:00:00",
+    "end_time": "2025-01-30T11:00:00"
+  }
+]
+```
+*(If empty, returns `[]`.)*
+
+---
+
+### 2. **Retrieve a Specific Booking**
+```bash
+curl -X GET http://127.0.0.1:8000/bookings/123e4567-e89b-12d3-a456-426614174000 \
+     -H "Accept: application/json"
+```
+**Response (HTTP 200):**
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "customer_name": "John Doe",
+  "technician_name": "Alice Tech",
+  "profession": "Plumber",
+  "start_time": "2025-01-30T10:00:00",
+  "end_time": "2025-01-30T11:00:00"
+}
+```
+
+**If not found (HTTP 404):**
+```json
+{
+  "detail": "Booking with ID 123e4567-e89b-12d3-a456-426614174000 not found."
+}
+```
+
+---
+
+### 3. **Create a New Booking**
+```bash
+curl -X POST http://127.0.0.1:8000/bookings/ \
+     -H "Content-Type: application/json" \
+     -d '{
+           "customer_name": "Maria Garcia",
+           "technician_name": "Mike Davis",
+           "profession": "Plumber",
+           "start_time": "2025-02-10T09:00:00"
+         }'
+```
+**Response (HTTP 201):**
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "customer_name": "Maria Garcia",
+  "technician_name": "Mike Davis",
+  "profession": "Plumber",
+  "start_time": "2025-02-10T09:00:00",
+  "end_time": "2025-02-10T10:00:00"
+}
+```
+*(Note the auto-generated `id` and the one-hour offset `end_time`.)*
+
+**If validation fails (HTTP 400):**
+```json
+{
+  "detail": "Profession must be one of: Plumber, Electrician, Gardener, ...etc"
+}
+```
+
+---
+
+### 4. **Cancel (Delete) a Booking**
+```bash
+curl -X DELETE http://127.0.0.1:8000/bookings/3fa85f64-5717-4562-b3fc-2c963f66afa6
+```
+**Response (HTTP 204)** *(No Content)*
+
+**If not found (HTTP 404):**
+```json
+{
+  "detail": "Booking with ID 3fa85f64-5717-4562-b3fc-2c963f66afa6 not found."
+}
+```
+
+---
+
+## **Notes**
+- **Accept Header**:  
+  You can include `-H "Accept: application/json"` to explicitly request JSON responses (FastAPI defaults to JSON).
+- **Content-Type**:  
+  When creating a booking (POST), specify `-H "Content-Type: application/json"` with the JSON body.
+
+These **cURL** examples provide a straightforward way to test your **FastAPI** endpoints quickly and confirm that your **in-memory** booking system or future database integration is functioning as expected.
 
 ## Further Notes
 

@@ -28,7 +28,7 @@ def create_app() -> FastAPI:
             "A system to schedule, retrieve, and cancel technician "
             "bookings, featuring an NLP-based console interface."
         ),
-        version="0.1.0",
+        version=settings.APP_VERSION,  # e.g., "0.1.0"
     )
 
     @app.on_event("startup")
