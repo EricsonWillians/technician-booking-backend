@@ -72,29 +72,34 @@ def delete_booking_by_id(booking_id: str) -> bool:
     return False
 
 
-def create_booking(booking_data: BookingCreate) -> Booking:
+def create_booking(booking_data: BookingCreate, system_init: bool = False) -> Booking:
     """
-    Create a new booking, ensuring it does not conflict with an existing booking
+    Create a new booking, ensuring it does not conflict with existing bookings
     for the same technician. Automatically sets a one-hour duration.
 
     Args:
         booking_data (BookingCreate): Pydantic schema containing
             customer_name, technician_name, profession, and start_time.
+        system_init (bool): When True, bypasses the time validation check
+            to allow loading historical data during system initialization.
 
     Raises:
         ValueError: If the requested slot overlaps with an existing booking
             for the same technician, the profession is not allowed,
-            or the time is invalid (e.g., in the past).
+            or the time is invalid (except during system initialization).
 
     Returns:
         The newly created Booking (domain model).
     """
-    # Validate profession and times (start_time, end_time)
+    # Validate profession
     validate_profession(booking_data.profession)
 
     start_time = booking_data.start_time
     end_time = start_time + timedelta(hours=1)
-    validate_booking_time(start_time, end_time)
+    
+    # Only validate booking time for non-system initialization bookings
+    if not system_init:
+        validate_booking_time(start_time, end_time)
 
     # Check for technician conflicts
     for existing_booking in in_memory_bookings_db.values():

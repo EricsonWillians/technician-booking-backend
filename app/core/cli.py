@@ -6,6 +6,8 @@ styling, consistent visual hierarchy, and robust error handling.
 import sys
 import typer
 import logging
+import asyncio
+from functools import wraps
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -18,6 +20,7 @@ from rich.padding import Padding
 from typing import Callable, Optional, Dict, Any
 
 from app.utils.llm_processor import llm_processor, LLMProcessor
+from app.core import initial_data
 from app.services import booking_service
 from app.schemas.booking import BookingCreate
 from app.config.settings import settings
@@ -272,25 +275,25 @@ def handle_list_bookings():
             display_warning_message("No current bookings found", "Bookings")
             return
 
-        # Create table for bookings
+        # Create table with proper styling
         table = Table(
             title="Current Bookings",
             show_header=True,
-            header_style="bold accent",
-            border_style="accent",
-            title_style="bold accent",
+            header_style="bold blue",
+            border_style="blue",
+            title_style="bold blue",
             padding=(0, 1),
             show_edge=True
         )
 
-        # Define columns
+        # Define columns with native Rich colors
         columns = [
-            ("ID", "accent"),
-            ("Customer", "info"),
-            ("Technician", "info"),
-            ("Profession", "primary"),
-            ("Start Time", "secondary"),
-            ("End Time", "secondary")
+            ("ID", "blue"),
+            ("Customer", "cyan"),
+            ("Technician", "cyan"),
+            ("Profession", "magenta"),
+            ("Start Time", "green"),
+            ("End Time", "green")
         ]
         
         for col_name, style in columns:
@@ -362,15 +365,37 @@ def initialize_processor() -> LLMProcessor:
         logger.exception("Language processor initialization failed")
         raise typer.Exit(code=1)
 
+def async_handler(func: Callable) -> Callable:
+    """
+    Decorator to handle async functions in synchronous context.
+    Ensures proper event loop handling across different platforms.
+    """
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(func(*args, **kwargs))
+    return wrapper
+
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context):
-    """Main application entry point with enhanced error handling."""
+@async_handler
+async def main(ctx: typer.Context):
+    """
+    Main application entry point with proper async/sync handling.
+    Manages both the async initial data loading and synchronous CLI operations.
+    """
     if ctx.invoked_subcommand is not None:
         return
 
     try:
         processor = initialize_processor()
         display_welcome()
+        
+        # Handle async initial data loading
+        await initial_data.load_initial_data()
 
         while True:
             try:
