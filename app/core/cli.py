@@ -1,6 +1,23 @@
 """
-Enhanced CLI implementation for the Technician Booking System with professional-grade
-styling, consistent visual hierarchy, and robust error handling.
+==========================================================
+            TECHNICIAN BOOKING SYSTEM - CLI
+==========================================================
+
+  Enhanced Command-Line Interface for the Technician Booking System  
+  with professional-grade styling, consistent visual hierarchy,  
+  and robust error handling.
+
+  Features:
+  - Rich, formatted output with enhanced readability  
+  - Interactive command processing with real-time NLP parsing  
+  - Robust error handling and logging integration  
+  - Intuitive user experience with clear visual feedback  
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 import sys
@@ -19,7 +36,7 @@ from rich.style import Style
 from rich.padding import Padding
 from typing import Callable, Optional, Dict, Any
 
-from app.services.nlp_service import llm_processor, NLPService
+from app.services.nlp_service import nlp_service, NLPService
 from app.core import initial_data
 from app.services import booking_service
 from app.schemas.booking import BookingCreate
@@ -369,7 +386,7 @@ def initialize_processor() -> NLPService:
     """Initialize the language processor with error handling."""
     try:
         logger.info("Initializing language processor...")
-        processor = llm_processor
+        processor = nlp_service
         logger.info("Language processor initialized successfully")
         return processor
     except Exception as e:

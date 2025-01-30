@@ -1,8 +1,21 @@
 """
-initial_data.py
+==========================================================
+           TECHNICIAN BOOKING SYSTEM - DATA SEEDER
+==========================================================
 
-This module provides functionality for seeding initial data into the
-Technician Booking System using the established schema format.
+  This module provides functionality for seeding initial  
+  data into the Technician Booking System using the  
+  established schema format.
+
+  - Populates the system with default bookings on startup  
+  - Uses the BookingCreate schema for consistency  
+  - Ensures a clean initialization of the in-memory database  
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 from typing import NoReturn

@@ -1,9 +1,19 @@
 """
-booking_service.py
+==========================================================
+                BOOKING SERVICE MODULE
+==========================================================
 
-Implements the core business logic (CRUD operations) for managing Bookings
-within the Technician Booking System. Uses an in-memory data store by default,
-but can be extended to connect with a real database in production.
+  Implements the core business logic (CRUD operations) 
+  for managing bookings within the Technician Booking System.
+
+  - Uses an in-memory data store by default
+  - Can be extended to connect with a real database in production
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 from datetime import timedelta

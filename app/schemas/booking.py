@@ -1,8 +1,17 @@
 """
-booking.py
+==========================================================
+                BOOKING SCHEMA MODULE
+==========================================================
 
-Pydantic schemas for the Technician Booking System, providing data validation 
-and structure for both API interactions and internal service operations.
+  Pydantic schemas for the Technician Booking System, 
+  providing data validation and structure for both API 
+  interactions and internal service operations.
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 from datetime import datetime

@@ -98,7 +98,7 @@ files=(
     "./app/config/__init__.py"
     "./app/config/settings.py"
     "./app/utils/__init__.py"
-    "./app/utils/llm_processor.py"
+    "./app/utils/nlp_service.py"
     "./tests/__init__.py"
     "./tests/unit/test_services.py"
     "./tests/integration/test_api.py"

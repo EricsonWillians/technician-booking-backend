@@ -1,12 +1,21 @@
 """
-validation.py
+==========================================================
+                VALIDATION UTILITIES
+==========================================================
 
-Provides validation utilities for the Technician Booking System, supporting both
-regular operations and system initialization scenarios.
+  Provides validation utilities for the Technician Booking System, 
+  supporting both regular operations and system initialization scenarios.
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 from datetime import datetime, timedelta
 from typing import Optional, Dict
+from zoneinfo import ZoneInfo
 from app.config.settings import settings
 from app.models.booking import Booking
 
@@ -18,20 +27,8 @@ def validate_booking_time(
     existing_bookings: Optional[Dict[str, Booking]] = None,
     system_init: bool = False
 ) -> None:
-    """
-    Validates booking time constraints according to business rules.
-    
-    Args:
-        start_time: The proposed booking start time
-        end_time: The proposed booking end time
-        technician_name: The name of the technician for conflict checking
-        existing_bookings: Dictionary of current bookings to check for conflicts
-        system_init: When True, bypasses the past-time validation for system initialization
-    
-    Raises:
-        ValueError: If any time-related constraint is violated
-    """
-    if not system_init and start_time < datetime.now():
+    current_time = datetime.now(ZoneInfo(settings.TIMEZONE))
+    if not system_init and start_time < current_time:
         raise ValueError("Cannot book a technician in the past.")
 
     # Enforce one-hour duration

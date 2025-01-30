@@ -1,9 +1,20 @@
 """
-booking.py
+==========================================================
+            TECHNICIAN BOOKING SYSTEM - MODEL
+==========================================================
 
-Defines the core Booking domain model used within the Technician Booking
-System. Currently implemented as a simple dataclass for in-memory usage,
-but can be adapted for a real database solution (e.g., SQLAlchemy).
+  Defines the core Booking domain model used within the  
+  Technician Booking System.  
+
+  - Implemented as a simple dataclass for in-memory usage  
+  - Can be extended to support a real database (e.g., SQLAlchemy)  
+  - Automatically generates unique booking IDs (UUID)  
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
 import uuid

@@ -1,30 +1,47 @@
 """
-bookings.py
+==========================================================
+               BOOKINGS ROUTER MODULE
+==========================================================
 
-A FastAPI router dedicated to Booking CRUD operations within the Technician Booking System.
+  A FastAPI router dedicated to Booking CRUD operations 
+  within the Technician Booking System.
 
-Endpoints:
-  1. GET    /bookings
-     - List all existing bookings in the system.
-  2. GET    /bookings/{booking_id}
-     - Retrieve details of a specific booking by its unique ID (UUID or numeric).
-  3. POST   /bookings
-     - Create a new booking with validated request data (customer, technician, etc.).
-  4. DELETE /bookings/{booking_id}
-     - Cancel or remove a booking by ID.
+  Endpoints:
+  - GET    /bookings       → List all existing bookings
+  - GET    /bookings/{id}  → Retrieve details of a specific booking
+  - POST   /bookings       → Create a new booking
+  - DELETE /bookings/{id}  → Cancel or remove a booking
 
-All endpoints return appropriate HTTP status codes and responses,
-with standardized error handling (e.g., 404 if a booking is not found).
+  All endpoints return appropriate HTTP status codes and 
+  standardized error handling.
+
+  Author : Ericson Willians  
+  Email  : ericsonwillians@protonmail.com  
+  Date   : January 2025  
+
+==========================================================
 """
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 from app.services import booking_service
 from app.schemas.booking import BookingCreate, BookingResponse
+from app.services.nlp_service import nlp_service
 
 router = APIRouter()
+
+class CommandRequest(BaseModel):
+    message: str
+
+class CommandResult(BaseModel):
+    """Structured data returned by /bookings/commands for easier frontend parsing."""
+    intent: str                   # e.g. "list_bookings", "retrieve_booking"
+    message: Optional[str] = None # e.g. "Booking created!"
+    booking: Optional[BookingResponse] = None
+    bookings: Optional[List[BookingResponse]] = None
 
 @router.get(
     "/",
@@ -209,3 +226,135 @@ def delete_booking(booking_id: str):
             detail=f"Booking with ID {booking_id} not found."
         )
     # status_code=204 → no content in successful response
+
+@router.post(
+    "/commands",
+    response_model=CommandResult,
+    summary="Process a raw NLP command",
+    response_description="Structured JSON result containing the recognized intent, message, and any booking data."
+)
+def process_command(cmd: CommandRequest):
+    """
+    Process a raw user command via NLP.
+
+    **Request Body**:
+    - `message` (str): The raw text typed by the user, e.g., "Show my electrician booking next Monday"
+
+    **Response** (`CommandResult`):
+    - `intent` (str): e.g., "create_booking", "list_bookings"
+    - `message` (str): A brief human-readable response
+    - `booking` (BookingResponse | null): If a single booking is relevant
+    - `bookings` (List[BookingResponse] | null): If multiple bookings are relevant
+    """
+    user_text = cmd.message.strip()
+    if not user_text:
+        raise HTTPException(status_code=400, detail="Empty command")
+
+    # 1) Parse the intent & data from user_text using your NLP service
+    parsed = nlp_service.parse_user_input(user_text)
+
+    # 2) Based on the parsed.intent, perform the relevant booking action
+    try:
+        if parsed.intent == "list_bookings":
+            all_bookings = booking_service.get_all_bookings()
+            if not all_bookings:
+                return CommandResult(
+                    intent="list_bookings",
+                    message="No bookings found.",
+                    bookings=[]
+                )
+            
+            # Convert domain Booking objects to Pydantic `BookingResponse`.
+            booking_responses = [
+                BookingResponse(
+                    id=b.id,
+                    customer_name=b.customer_name,
+                    technician_name=b.technician_name,
+                    profession=b.profession,
+                    start_time=b.start_time,
+                    end_time=b.end_time
+                )
+                for b in all_bookings
+            ]
+            return CommandResult(
+                intent="list_bookings",
+                message=f"Found {len(booking_responses)} bookings.",
+                bookings=booking_responses
+            )
+
+        elif parsed.intent == "retrieve_booking":
+            booking_id = parsed.data.get("booking_id")
+            booking = booking_service.get_booking_by_id(booking_id)
+            if not booking:
+                raise HTTPException(status_code=404, detail=f"Booking {booking_id} not found.")
+
+            return CommandResult(
+                intent="retrieve_booking",
+                booking=BookingResponse(
+                    id=booking.id,
+                    customer_name=booking.customer_name,
+                    technician_name=booking.technician_name,
+                    profession=booking.profession,
+                    start_time=booking.start_time,
+                    end_time=booking.end_time
+                )
+            )
+
+        elif parsed.intent == "create_booking":
+            booking_create = BookingCreate(
+                customer_name=parsed.data.get("customer_name", "Anonymous"),
+                technician_name=parsed.data.get("technician_name", "Unknown Tech"),
+                profession=parsed.data["profession"],
+                start_time=parsed.data["start_time"],
+            )
+            new_b = booking_service.create_booking(booking_create)
+            
+            return CommandResult(
+                intent="create_booking",
+                message="Created booking successfully!",
+                booking=BookingResponse(
+                    id=new_b.id,
+                    customer_name=new_b.customer_name,
+                    technician_name=new_b.technician_name,
+                    profession=new_b.profession,
+                    start_time=new_b.start_time,
+                    end_time=new_b.end_time
+                )
+            )
+
+        elif parsed.intent == "cancel_booking":
+            booking_id = parsed.data.get("booking_id")
+            success = booking_service.cancel_booking(booking_id)
+            if not success:
+                raise HTTPException(status_code=404, detail=f"Booking {booking_id} not found.")
+            return CommandResult(
+                intent="cancel_booking",
+                message=f"Booking {booking_id} cancelled."
+            )
+
+        else:
+            return CommandResult(
+                intent="unknown",
+                message=(
+                    "Unknown command. Try:\n"
+                    "- list bookings\n"
+                    "- retrieve booking <id>\n"
+                    "- cancel booking <id>\n"
+                    "- create booking"
+                )
+            )
+    except ValueError as ve:
+        # Catching validation errors like booking conflicts
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        # Here I could use some observability tool to log the error in production
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unhandled exception in process_command: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while processing your command."
+        )
