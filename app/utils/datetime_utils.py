@@ -67,6 +67,7 @@ class DateTimeExtractor:
         try:
             self.timezone_obj = ZoneInfo(self.timezone)
             self.current_time = datetime.now(self.timezone_obj)
+            self.business_hours = BusinessHours()
             logger.info(f"DateTimeExtractor initialized with timezone: {self.timezone}")
         except Exception as e:
             logger.error(f"Failed to set timezone {self.timezone}. Defaulting to UTC. Error: {e}")
@@ -75,55 +76,130 @@ class DateTimeExtractor:
             self.current_time = datetime.now(self.timezone_obj)
 
     def extract_datetime_entities(self, entities: Dict[str, Any], text: str) -> Dict[str, Any]:
-        """Enhanced datetime extraction with better relative date handling."""
+        """Main entry point for datetime extraction."""
         try:
-            # Try explicit date/time first
-            date_str = entities.get("date", "")
-            time_str = entities.get("time", "")
-            datetime_str = f"{date_str} {time_str}".strip()
-
-            extracted_time = None
-            if datetime_str:
-                try:
-                    extracted_time = self._parse_datetime(datetime_str)
-                except DateTimeExtractionError:
-                    pass
-
-            # If no explicit datetime, try relative patterns
-            if not extracted_time:
-                extracted_time = self._extract_relative_datetime(text)
-
-            # If still no datetime, try fuzzy parsing
-            if not extracted_time:
-                try:
-                    extracted_time = self._fuzzy_parse_datetime(text)
-                except DateTimeExtractionError:
-                    extracted_time = self._default_booking_time()
-
-            # Ensure timezone awareness and business hours
-            if extracted_time and not extracted_time.tzinfo:
-                extracted_time = extracted_time.replace(tzinfo=self.timezone_obj)
-
-            extracted_time = BusinessHours.adjust_to_business_hours(extracted_time)
+            # Try explicit time pattern first
+            time_pattern = r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)'
+            time_match = re.search(time_pattern, text.lower())
             
-            entities["start_time"] = extracted_time
-            logger.info(f"Final extracted datetime: {extracted_time}")
+            base_date = self._extract_date_component(text)
+            if not base_date:
+                base_date = self.current_time + timedelta(days=1)
+            
+            if time_match:
+                # Extract hour and minute from the match
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2)) if time_match.group(2) else 0
+                meridiem = time_match.group(3)
+                
+                # Convert to 24-hour format
+                if meridiem == 'pm' and hour < 12:
+                    hour += 12
+                elif meridiem == 'am' and hour == 12:
+                    hour = 0
+                
+                # Combine date and time
+                extracted_time = base_date.replace(
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
+                    tzinfo=self.timezone_obj
+                )
+            else:
+                # No explicit time found, use default booking hour
+                extracted_time = base_date.replace(
+                    hour=settings.DEFAULT_BOOKING_HOUR,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                    tzinfo=self.timezone_obj
+                )
+
+            # Adjust to business hours if needed
+            final_time = self.business_hours.adjust_to_business_hours(extracted_time)
+            entities["start_time"] = final_time
+            logger.info(f"Extracted and adjusted datetime: {final_time}")
             return entities
 
         except Exception as e:
-            logger.error(f"Failed to extract datetime: {e}")
-            entities["start_time"] = self._default_booking_time()
+            logger.error(f"Failed to extract datetime: {str(e)}")
+            # Fallback to next business day
+            entities["start_time"] = self.business_hours._next_business_day()
             return entities
-
-    def _extract_relative_datetime(self, text: str) -> Optional[datetime]:
-        """Extract datetime from relative expressions."""
+        
+    def _extract_date_component(self, text: str) -> Optional[datetime]:
+        """Extract date component from text."""
         text_lower = text.lower()
         
+        # Check for weekdays
+        for weekday, day_num in self.WEEKDAYS.items():
+            if weekday in text_lower:
+                return self._next_weekday(self.current_time, day_num)
+                
+        # Try fuzzy parsing as last resort
+        try:
+            parsed_date = parser.parse(text, fuzzy=True, default=self.current_time)
+            if parsed_date < self.current_time:
+                return self.current_time + timedelta(days=1)
+            return parsed_date
+        except:
+            return None
+
+    def _extract_relative_datetime(self, text: str) -> Optional[datetime]:
+        """Extract datetime from relative expressions with preserved time specifications."""
+        text_lower = text.lower()
+        
+        # First try to extract any explicit time
+        explicit_time = None
+        time_pattern = r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)'
+        time_match = re.search(time_pattern, text_lower)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2)) if time_match.group(2) else 0
+            meridiem = time_match.group(3)
+            
+            # Convert to 24-hour format
+            if meridiem == 'pm' and hour < 12:
+                hour += 12
+            elif meridiem == 'am' and hour == 12:
+                hour = 0
+                
+            explicit_time = time(hour=hour, minute=minute)
+
+        # Check for weekdays
+        for weekday, day_num in self.WEEKDAYS.items():
+            if weekday in text_lower:
+                target_date = self._next_weekday(self.current_time, day_num)
+                if explicit_time:
+                    return target_date.replace(
+                        hour=explicit_time.hour,
+                        minute=explicit_time.minute,
+                        second=0,
+                        microsecond=0
+                    )
+                else:
+                    # Only use default hour if no time was specified
+                    return target_date.replace(
+                        hour=settings.DEFAULT_BOOKING_HOUR,
+                        minute=0,
+                        second=0,
+                        microsecond=0
+                    )
+
         # Check for relative days
         for rel_day, days_ahead in self.RELATIVE_DAYS.items():
             if rel_day in text_lower:
                 base_date = self.current_time + timedelta(days=days_ahead)
                 
+                if explicit_time:
+                    return base_date.replace(
+                        hour=explicit_time.hour,
+                        minute=explicit_time.minute,
+                        second=0,
+                        microsecond=0
+                    )
+                    
                 # Check for time period in the same phrase
                 for period, (hour, minute) in self.TIME_PERIODS.items():
                     if period in text_lower:
@@ -142,24 +218,6 @@ class DateTimeExtractor:
                     microsecond=0
                 )
 
-        # Check for weekdays
-        for weekday, day_num in self.WEEKDAYS.items():
-            if weekday in text_lower:
-                target_date = self._next_weekday(self.current_time, day_num)
-                return target_date.replace(
-                    hour=settings.DEFAULT_BOOKING_HOUR,
-                    minute=0,
-                    second=0,
-                    microsecond=0
-                )
-
-        # Check for relative time patterns
-        for pattern, delta_func in self.RELATIVE_TIME_PATTERNS:
-            match = re.search(pattern, text_lower)
-            if match:
-                delta = delta_func(match)
-                return self.current_time + delta
-
         return None
 
     def _next_weekday(self, ref_date: datetime, weekday: int) -> datetime:
@@ -167,7 +225,8 @@ class DateTimeExtractor:
         days_ahead = weekday - ref_date.weekday()
         if days_ahead <= 0:  # Target day already happened this week
             days_ahead += 7
-        return ref_date + timedelta(days=days_ahead)
+        next_date = ref_date + timedelta(days=days_ahead)
+        return next_date
 
     def _fuzzy_parse_datetime(self, text: str) -> datetime:
         """Fuzzy parse datetime with better handling of relative terms."""
@@ -208,39 +267,47 @@ class DateTimeExtractor:
         )
 
 class BusinessHours:
-    """Business hours handling with improved validation."""
+    """Business hours handling with proper instance methods."""
     
-    OPEN_HOUR = settings.DEFAULT_BOOKING_HOUR
-    CLOSE_HOUR = settings.LAST_BOOKING_HOUR
+    def __init__(self):
+        self.open_hour = settings.DEFAULT_BOOKING_HOUR
+        self.close_hour = settings.LAST_BOOKING_HOUR
+        self.timezone = settings.TIMEZONE or "UTC"
+        self.timezone_obj = ZoneInfo(self.timezone)
 
-    @classmethod
-    def is_within_hours(cls, dt: datetime) -> bool:
+    def is_within_hours(self, dt: datetime) -> bool:
         """Check if time is within business hours."""
-        return cls.OPEN_HOUR <= dt.hour < cls.CLOSE_HOUR
+        return self.open_hour <= dt.hour < self.close_hour
 
-    @classmethod
-    def adjust_to_business_hours(cls, dt: datetime) -> datetime:
-        """Adjust datetime to valid business hours."""
+    def adjust_to_business_hours(self, dt: datetime) -> datetime:
+        """Adjust datetime to valid business hours while preserving user-specified times when possible."""
         if not dt:
-            return cls._next_business_day()
+            return self._next_business_day()
 
-        if cls.is_within_hours(dt):
+        # Ensure datetime is timezone-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=self.timezone_obj)
+
+        # If within business hours, respect the original time
+        if self.is_within_hours(dt):
             return dt
-
-        if dt.hour < cls.OPEN_HOUR:
-            return dt.replace(hour=cls.OPEN_HOUR, minute=0, second=0, microsecond=0)
+            
+        # If before business hours on the same day
+        if dt.hour < self.open_hour:
+            logger.warning(f"Requested time {dt.strftime('%I:%M %p')} is before business hours, adjusting to opening time")
+            return dt.replace(hour=self.open_hour, minute=0, second=0, microsecond=0)
         
-        # After business hours, schedule for next day
+        # If after business hours, move to next day
         next_day = dt + timedelta(days=1)
-        return next_day.replace(hour=cls.OPEN_HOUR, minute=0, second=0, microsecond=0)
+        logger.warning(f"Requested time {dt.strftime('%I:%M %p')} is after business hours, moving to next day")
+        return next_day.replace(hour=self.open_hour, minute=0, second=0, microsecond=0)
 
-    @classmethod
-    def _next_business_day(cls) -> datetime:
-        """Get next business day with proper timezone."""
-        now = datetime.now(ZoneInfo(settings.TIMEZONE or "UTC"))
+    def _next_business_day(self) -> datetime:
+        """Get next business day starting time."""
+        now = datetime.now(self.timezone_obj)
         next_day = now + timedelta(days=1)
         return next_day.replace(
-            hour=cls.OPEN_HOUR,
+            hour=self.open_hour,
             minute=0,
             second=0,
             microsecond=0

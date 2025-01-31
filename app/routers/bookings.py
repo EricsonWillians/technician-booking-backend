@@ -119,25 +119,21 @@ def get_confidence_assessment(score: float) -> str:
     response_description="List of all bookings with metadata"
 )
 async def list_bookings():
-    """Retrieve all bookings with enhanced error handling."""
+    """Retrieve all bookings with enhanced formatting for a better display."""
     try:
         bookings = booking_service.get_all_bookings()
-        
-        # Manually construct BookingResponse instances with ISO-formatted datetime fields
-        booking_responses = []
-        for b in bookings:
-            booking_data = {
-                "id": b.id,
-                "customer_name": b.customer_name,
-                "technician_name": b.technician_name,
-                "profession": b.profession,
-                "start_time": b.start_time.isoformat(),
-                "end_time": b.end_time.isoformat()
-            }
-            booking_responses.append(BookingResponse(**booking_data))
+
+        formatted_bookings = "\n".join([
+            f"- **ID:** {b.id}\n"
+            f"  **Technician:** {b.technician_name}\n"
+            f"  **Profession:** {b.profession}\n"
+            f"  **Start:** {b.start_time.strftime('%Y-%m-%d %I:%M %p')}\n"
+            f"  **End:** {b.end_time.strftime('%Y-%m-%d %I:%M %p')}\n"
+            for b in bookings
+        ])
         
         return create_success_response(
-            data=booking_responses,
+            data={"formatted_bookings": formatted_bookings},
             metadata={
                 "total_count": len(bookings),
                 "timestamp": datetime.now().isoformat()
@@ -272,7 +268,7 @@ async def process_command(command: CommandRequest):
     try:
         # Get intent classification with confidence scores
         intent, scores = nlp_service.classify_intent(command.message)
-        
+
         # Create analysis scores
         analysis = [
             AnalysisScore(
@@ -286,16 +282,15 @@ async def process_command(command: CommandRequest):
         # Process the command
         response = nlp_service.handle_message(command.message)
         
-        # Manually serialize booking datetime fields if present
-        booking = response.booking
+        # Extract the booking object if available
+        booking = getattr(response, "booking", None)
+        booking_response = None
         if booking:
             booking = booking.dict()
             booking["start_time"] = booking["start_time"].isoformat()
             booking["end_time"] = booking["end_time"].isoformat()
             booking_response = BookingResponse(**booking)
-        else:
-            booking_response = None
-        
+
         return create_success_response(
             data=CommandResult(
                 success=True,
@@ -305,7 +300,7 @@ async def process_command(command: CommandRequest):
                 booking=booking_response,
                 metadata={
                     "processed_at": datetime.now().isoformat(),
-                    "processing_time_ms": 0  # You could add actual processing time here
+                    "processing_time_ms": 0
                 }
             ).dict(),
             metadata={}
