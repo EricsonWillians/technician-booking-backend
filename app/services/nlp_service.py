@@ -1,871 +1,516 @@
+# app/services/nlp_service.py
+
 """
 ==========================================================
-                  NLP SERVICE MODULE
+               TECHNICIAN BOOKING SYSTEM - NLP SERVICE
 ==========================================================
 
-  A professional-grade multi-pipeline NLP service using 
-  Hugging Face Transformers.
+Implements the Natural Language Processing (NLP) service for the
+Technician Booking System. Utilizes Zero-Shot Classification and
+Named Entity Recognition (NER) pipelines from Hugging Face's Transformers
+library to interpret user inputs, extract intents and relevant entities,
+and facilitate booking operations.
 
-  Features:
-  - Zero-shot classification for user intent detection
-  - Named Entity Recognition (NER) for extracting names 
-    (technician, customer) and partial time expressions
-  - Text-to-text LLM for advanced date/time interpretation
+Key Features:
+- Intent Classification: Determines user intent (e.g., create, cancel, query bookings).
+- Entity Extraction: Extracts professions, technician names, datetime, and booking IDs.
+- Booking Operations: Interfaces with the booking service to create, cancel, or query bookings.
+- Multi-Interface Support: Designed to be used seamlessly with both CLI and FastAPI routes.
+- Detailed Intent Scores: Returns intent classification scores for monitoring model performance.
 
-  Author : Ericson Willians  
-  Email  : ericsonwillians@protonmail.com  
-  Date   : January 2025  
+Author : Ericson Willians  
+Email  : ericsonwillians@protonmail.com  
+Date   : January 2025  
 
 ==========================================================
 """
 
-import os
-import re
 import logging
+import re
+from typing import Optional, Tuple, Dict
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
 
-import torch
-import dateutil
-from dateutil.parser import parse
-from transformers import pipeline, Pipeline
-from dataclasses import dataclass
-from pydantic import BaseModel, Field
+from transformers import pipeline
+from dateutil import parser
 
-from app.config.settings import settings
-
-from app.utils.datetime_utils import (
-    create_datetime_extractor,
-    DateTimeExtractionError,
-    BusinessHours
+from app.models.professions import ProfessionEnum
+from app.services.booking_service import (
+    create_booking,
+    get_booking_by_id,
+    cancel_booking,
+    get_all_bookings,  # Ensure this function exists in booking_service.py
 )
+from app.schemas.booking import BookingCreate
+from app.config.settings import settings
+from app.utils.datetime_utils import DateTimeExtractor, DateTimeExtractionError
+from app.services import booking_service
 
-from functools import lru_cache
+from dataclasses import dataclass, field
 
-# Configure logging
+# Configure logger
 logger = logging.getLogger(__name__)
-logger.setLevel(settings.LOG_LEVEL)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-if not logger.handlers:
-    logger.addHandler(handler)
 
 
-class PipelineException(Exception):
-    """Custom exception for pipeline initialization failures."""
-
-    pass
-
-
-class PipelineInitError(Exception):
-    """Raised when a pipeline fails to initialize properly."""
-
-    pass
-
-
-class TextInterpretationError(Exception):
-    """Raised when the LLM fails to interpret text correctly."""
-
-    pass
-
-
-class EntityExtractionError(Exception):
-    """Raised when entity extraction fails critically."""
-
-    pass
-
-
-class ExtractedNames(BaseModel):
-    """
-    Data class for storing extracted name entities.
-
-    Attributes:
-        customer_name (Optional[str]): The identified customer's name, if found
-        technician_name (Optional[str]): The identified technician's name, if found
-    """
-
-    customer_name: Optional[str] = Field(None, description="Customer's full name")
-    technician_name: Optional[str] = Field(None, description="Technician's full name")
-
-
-@dataclass(frozen=True)
-class ParsedCommand:
-    """
-    Immutable container for parsed user input.
-
-    Attributes:
-        intent (str): The identified intent (e.g., "create_booking")
-        data (Dict[str, Any]): Key/value data extracted from user input
-    """
-
-    intent: str
-    data: Dict[str, Any]
-
-    def __post_init__(self) -> None:
-        if not self.intent:
-            raise ValueError("Intent cannot be empty")
-        if not isinstance(self.data, dict):
-            raise ValueError("Data must be a dictionary")
-
-
+@dataclass
+class MessageResponse:
+    """Data class to encapsulate the response message and intent scores."""
+    response: str
+    intent_scores: Dict[str, float]
 class NLPService:
-    """
-    Multi-pipeline NLP service for booking system text interpretation.
-
-    This service orchestrates multiple machine learning models to understand and
-    extract structured information from natural language booking requests. It combines:
-        1. Zero-shot classification for intent detection
-        2. Named Entity Recognition for profession identification
-        3. Large Language Model for complex text interpretation
-
-    Attributes:
-        intent_classifier (Pipeline): Zero-shot classification pipeline
-        ner_pipeline (Pipeline): Named Entity Recognition pipeline
-        text_interpreter (Pipeline): Text interpretation LLM pipeline
-        device (torch.device): The device (CPU/GPU) used for inference
-        device_name (str): Human-readable device name
-
-    Example:
-        >>> service = NLPService()
-        >>> text = "I'm John Doe and I need plumber Mike Johnson tomorrow at 2 PM"
-        >>> entities = service._extract_entities(text)
-        >>> print(entities)
-        {
-            'customer_name': 'John Doe',
-            'technician_name': 'Mike Johnson',
-            'profession': 'plumber',
-            'start_time': datetime(2024, 1, 31, 14, 0)
-        }
-    """
-    
-    INTENT_LABEL_MAPPING = {
-        "Create a booking": "create_booking",
-        "Cancel a booking": "cancel_booking",
-        "Retrieve booking details": "retrieve_booking",
-        "List all bookings": "list_bookings",
-    }
-
-    def __init__(self) -> None:
+    def __init__(self):
         """
-        Initialize the NLP service with required ML pipelines.
-
-        The initialization process includes:
-        1. Validating configuration settings
-        2. Optimizing hardware selection (CPU/GPU)
-        3. Initializing all required ML pipelines
-
-        Raises:
-            PipelineInitError: If any pipeline fails to initialize
-            ValueError: If critical settings are invalid
+        Initialize NLP components with improved classification.
         """
-        self._validate_settings()
-        self.device, self.device_name = self._optimize_hardware()
-
-        try:
-            # Initialize core pipelines
-            self.intent_classifier = self._init_pipeline_with_retry(
-                "zero-shot-classification",
-                settings.ZERO_SHOT_MODEL_NAME,
-                {"multi_label": False},
-            )
-
-            self.ner_pipeline = self._init_pipeline_with_retry(
-                "token-classification",
-                settings.NER_MODEL_NAME,
-                {"aggregation_strategy": "simple"},
-            )
-
-            # Initialize text interpretation LLM
-            self.text_interpreter = self._init_pipeline_with_retry(
-                "text2text-generation",
-                settings.TEXT_TO_TEXT_MODEL_NAME,
-                {"max_length": 128, "do_sample": False},
-            )
-
-        except Exception as e:
-            raise PipelineInitError(f"Failed to initialize NLP pipelines: {e}")
-
-        # Initialize datetime extractor
-        self.datetime_extractor = create_datetime_extractor(self.text_interpreter)
-
-    def _interpret_text(self, prompt: str) -> str:
-        """
-        Generic text interpretation method using the LLM.
-
-        Args:
-            prompt (str): The formatted prompt for the LLM
-
-        Returns:
-            str: The LLM's interpretation result
-
-        Raises:
-            ValueError: If no LLM is configured or the result is invalid
-        """
-        if not self.text_interpreter:
-            raise ValueError("No text interpretation LLM configured")
-
-        result = self.text_interpreter(prompt)
-        if not result or not isinstance(result, list):
-            raise ValueError(f"Invalid LLM interpretation result")
-
-        return result[0]["generated_text"].strip()
-
-    # -------------------------------------------------------------------------
-    # Initialization & Configuration
-    # -------------------------------------------------------------------------
-    def _validate_settings(self) -> None:
-        """
-        Validate critical configuration settings.
-
-        Checks:
-            - Required model names are configured
-            - Intent confidence threshold is valid
-            - Candidate intents list is not empty
-
-        Raises:
-            ValueError: If any validation fails
-        """
-        if not settings.CANDIDATE_INTENTS:
-            raise ValueError("CANDIDATE_INTENTS must be non-empty list")
-
-        if not (0 <= settings.INTENT_CONFIDENCE_THRESHOLD <= 1):
-            raise ValueError("INTENT_CONFIDENCE_THRESHOLD must be between 0 and 1")
-
-        required_models = {
-            "ZERO_SHOT_MODEL_NAME": settings.ZERO_SHOT_MODEL_NAME,
-            "NER_MODEL_NAME": settings.NER_MODEL_NAME,
-            "TEXT_TO_TEXT_MODEL_NAME": settings.TEXT_TO_TEXT_MODEL_NAME,
-        }
-
-        missing = [k for k, v in required_models.items() if not v]
-        if missing:
-            raise ValueError(f"Missing required model names: {', '.join(missing)}")
-
-    def _optimize_hardware(self) -> Tuple[torch.device, str]:
-        """
-        Select optimal hardware configuration for inference.
-
-        Returns:
-            Tuple[torch.device, str]: Device object and human-readable name
-
-        Note:
-            Enables GPU if available and configured, with optional half-precision
-        """
-        if torch.cuda.is_available() and settings.USE_GPU:
-            device = torch.device("cuda:0")
-            device_name = torch.cuda.get_device_name(0)
-
-            if settings.USE_HALF_PRECISION:
-                torch.backends.cudnn.benchmark = True
-                logger.info("Enabled half-precision inference")
-        else:
-            device = torch.device("cpu")
-            device_name = "CPU"
-
-        logger.info(f"Using device: {device_name}")
-        return device, device_name
-
-    def _model_cache_status(self, model_name: str) -> Tuple[bool, str]:
-        """Check if model is locally cached."""
-        cache_root = os.path.expanduser(settings.HF_CACHE_DIR)
-        model_dir = f"models--{model_name.replace('/', '--')}"
-        cache_path = os.path.join(cache_root, model_dir)
-        return os.path.exists(cache_path), cache_path
-
-    def _init_pipeline_with_retry(
-        self, task: str, model_name: str, task_args: Dict[str, Any]
-    ) -> Pipeline:
-        """
-        Create a pipeline with robust retries. If cache fails, attempt fresh download.
-        """
-        if not model_name:
-            logger.warning(
-                f"No model name provided for task={task}; skipping pipeline init."
-            )
-            return None
-
-        is_cached, cache_path = self._model_cache_status(model_name)
-        logger.info(f"Initializing {task} pipeline (Cached: {is_cached})...")
-
-        for attempt in range(settings.MODEL_LOAD_RETRIES):
-            try:
-                return pipeline(
-                    task=task,
-                    model=model_name,
-                    device=self.device,
-                    model_kwargs={"local_files_only": is_cached},
-                    **task_args,
-                )
-            except (OSError, PipelineException) as e:
-                if is_cached and attempt == 0:
-                    logger.warning(f"Model load failed from cache {cache_path}: {e}")
-                    is_cached = False
-                    continue
-                logger.error(f"Pipeline init failed (attempt {attempt+1}): {e}")
-                if attempt == settings.MODEL_LOAD_RETRIES - 1:
-                    raise RuntimeError(
-                        f"Failed to init {task} after {settings.MODEL_LOAD_RETRIES} tries"
-                    ) from e
-
-        # Should never reach here
-        raise RuntimeError("Unexpected pipeline initialization error.")
-
-    # -------------------------------------------------------------------------
-    # Public Interface
-    # -------------------------------------------------------------------------
-    def parse_user_input(self, text: str) -> ParsedCommand:
-        """
-        Process natural language user input into structured command.
+        logger.info("Initializing NLPService...")
         
-        Args:
-            text: Raw user input text
-            
-        Returns:
-            ParsedCommand with intent and extracted data
-            
-        Raises:
-            ValueError: If input is invalid or intent cannot be determined
-        """
-        self._validate_input(text)
-        cleaned_text = self._preprocess_text(text)
-
+        # Initialize Zero-Shot Classification pipeline with specific hypothesis
         try:
-            # Determine intent
-            intent_label, confidence = self._classify_intent(cleaned_text)
-            internal_intent = self.INTENT_LABEL_MAPPING.get(intent_label)
-            if not internal_intent:
-                raise ValueError(f"Unknown intent: {intent_label}")
-
-            # Extract entities
-            entities = self._extract_entities(cleaned_text)
-            entities["confidence"] = confidence
-
-            # Validate required fields
-            self._validate_intent_requirements(internal_intent, entities)
-
-            return ParsedCommand(
-                intent=internal_intent,
-                data=entities
+            self.intent_classifier = pipeline(
+                "zero-shot-classification",
+                model=settings.ZERO_SHOT_MODEL_NAME,
+                device=0 if self._is_gpu_available() else -1,
             )
+            logger.info("Zero-Shot Classification pipeline initialized successfully.")
         except Exception as e:
-            logger.error(f"Failed to parse input '{text}': {e}")
+            logger.error(f"Failed to initialize Zero-Shot Classification pipeline: {e}")
             raise
 
-    # -------------------------------------------------------------------------
-    # Input Validation & Preprocessing
-    # -------------------------------------------------------------------------
-    def _validate_input(self, text: str) -> None:
-        """Raise if text is empty, too short, too long, or not a string."""
-        if not isinstance(text, str):
-            raise TypeError("Input must be a string")
-
-        cleaned_text = text.strip()
-        if not cleaned_text:
-            raise ValueError("Input text cannot be empty or whitespace only")
-
-        if len(cleaned_text) < settings.MIN_INPUT_LENGTH:
-            raise ValueError(
-                f"Input must be at least {settings.MIN_INPUT_LENGTH} characters"
+        # Initialize NER pipeline
+        try:
+            self.ner_pipeline = pipeline(
+                "ner",
+                model=settings.NER_MODEL_NAME,
+                aggregation_strategy="simple",
+                device=0 if self._is_gpu_available() else -1,
             )
+            logger.info("NER pipeline initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize NER pipeline: {e}")
+            raise
 
-        if len(cleaned_text) > settings.MAX_INPUT_LENGTH:
-            raise ValueError(
-                f"Input exceeds max length of {settings.MAX_INPUT_LENGTH} characters"
-            )
+        self.datetime_extractor = DateTimeExtractor()
 
-        if not any(c.isalnum() for c in cleaned_text):
-            raise ValueError("Input must contain at least one alphanumeric character")
-
-    def _preprocess_text(self, text: str) -> str:
-        """Remove extra spacing, clip at max length."""
-        text = text.strip()
-        text = re.sub(r"\s+", " ", text)
-        return text[: settings.MAX_INPUT_LENGTH]
-
-    # -------------------------------------------------------------------------
-    # Intent Classification
-    # -------------------------------------------------------------------------
-    def _classify_intent(self, text: str) -> Tuple[str, float]:
-        """
-        1) Attempt explicit regex patterns
-        2) Otherwise fallback to zero-shot classification
-        """
-        text_lower = text.lower()
-        # Very simple rules to short-circuit
-        intent_patterns = {
-            "Cancel a booking": [
-                # e.g., "I want to cancel my booking", "Cancel booking", "Please remove my reservation"
-                r"(?i)\b(?:cancel|remove|delete|terminate|abort|discard|void)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
-                # e.g., "I need to undo my booking", "Revoke reservation"
-                r"(?i)\b(?:undo|revoke)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
-                # e.g., "Cancel my booking for tomorrow", "Delete booking on Friday"
-                r"(?i)\b(?:cancel|remove|delete|terminate|abort|discard|void)\s+(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\s+(?:for\s+.+)$",
+        # Enhanced intent patterns with better coverage
+        self.intent_patterns = {
+            "create_booking": [
+                r"\b(want|need|looking|book|schedule|get|make|arrange|set)\s+(?:to|a|an)?\s+(?:book|schedule|appointment|service|visit)\b",
+                r"\b(?:book|schedule|need|want)\s+(?:a|an)?\s+(?:gardener|plumber|electrician|carpenter|mechanic|painter|chef|teacher|developer|nurse)\b",
+                r"\bi(?:\s+would)?\s+(?:like|want|need)\s+to\s+(?:book|schedule|make|get)\b"
             ],
-            "List all bookings": [
-                # e.g., "List my bookings", "Show all reservations", "Display my appointments"
-                r"(?i)\b(?:list|show|display|view|see|get|fetch|present|give\s+me)\s+(?:all\s+)?(?:my\s+)?(?:bookings|reservations|appointments|schedules|sessions)\b",
-                # e.g., "Can you list my bookings?", "Please show all reservations"
-                r"(?i)\b(?:can\s+you\s+|please\s+)?(?:list|show|display|view|see|get|fetch|present|give\s+me)\s+(?:all\s+)?(?:my\s+)?(?:bookings|reservations|appointments|schedules|sessions)\b",
+            "cancel_booking": [
+                r"\b(?:cancel|delete|remove|stop)\s+(?:the|my|this)?\s*(?:booking|appointment|service|reservation)\b",
+                r"\bi\s+(?:want|need|would\s+like)\s+to\s+cancel\b"
             ],
-            "Retrieve booking details": [
-                # e.g., "Get details of my booking", "Find my reservation", "Retrieve appointment information"
-                r"(?i)\b(?:get|find|retrieve|access|look\s+up)\s+(?:the\s+)?(?:details\s+of\s+)?(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
-                # e.g., "Can you get booking details for me?", "Retrieve my reservation information"
-                r"(?i)\b(?:can\s+you\s+)?(?:get|find|retrieve|access|look\s+up)\s+(?:the\s+)?(?:details\s+of\s+)?(?:my\s+)?(?:booking|reservation|appointment|schedule|session)\b",
+            "query_booking": [
+                r"\b(?:what|where|when|how|show|get|check|find|view)\s+(?:is|are)?\s+(?:the|my)?\s*(?:booking|appointment|reservation)\b",
+                r"\b(?:booking|appointment|reservation)\s+(?:status|details|info|information)\b",
+                r"\bstatus\s+of\s+(?:my|the)\s+booking\b"
             ],
-            "Create a booking": [
-                # e.g., "I want to book a plumber", "Schedule an electrician", "Need a technician"
-                r"(?i)\b(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\b",
-                # e.g., "Can you book a plumber for me?", "Please schedule an electrician"
-                r"(?i)\b(?:can\s+you\s+|please\s+)?(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\b",
-                # e.g., "I need to book a technician tomorrow", "Schedule a plumber on Monday"
-                r"(?i)\b(?:book|schedule|reserve|arrange|set\s+up|make\s+a)\s+(?:an?\s+)?(?:plumber|electrician|technician)\s+(?:for\s+.+)$",
-            ],
+            "list_bookings": [
+                r"\b(?:list|show|view|display|get)\s+(?:all|my)?\s*(?:bookings|appointments|reservations|schedule)\b",
+                r"\bwhat\s+(?:bookings|appointments|reservations)\s+do\s+i\s+have\b"
+            ]
         }
-        for intent_label, patterns in intent_patterns.items():
-            for pat in patterns:
-                if re.search(pat, text_lower):
-                    logger.debug(f"Pattern matched intent: {intent_label}")
-                    return intent_label, 0.95
 
-        # Fall back to the zero-shot pipeline
-        if self.intent_classifier is None:
-            raise ValueError("No zero-shot pipeline configured to classify intent.")
+        # Enhanced intent descriptions for zero-shot classification
+        self.intent_descriptions = {
+            "create_booking": [
+                "make a new appointment or booking",
+                "schedule a service",
+                "book a professional",
+                "arrange an appointment",
+                "request a service booking",
+            ],
+            "cancel_booking": [
+                "cancel an existing booking",
+                "delete a scheduled appointment",
+                "remove a service booking",
+                "stop a scheduled service",
+            ],
+            "query_booking": [
+                "find information about a booking",
+                "check booking details",
+                "view appointment information",
+                "get booking status",
+            ],
+            "list_bookings": [
+                "view all scheduled appointments",
+                "show all my bookings",
+                "display booking schedule",
+                "list all reservations",
+            ]
+        }
 
-        classification = self.intent_classifier(
-            text, candidate_labels=settings.CANDIDATE_INTENTS, multi_label=False
-        )
-        top_label = classification["labels"][0]
-        top_conf = classification["scores"][0]
-
-        if top_conf < settings.INTENT_CONFIDENCE_THRESHOLD:
-            raise ValueError(f"Intent confidence too low: {top_conf}")
-
-        logger.debug(f"Zero-shot predicted '{top_label}' ({top_conf:.2f})")
-        return top_label, top_conf
-
-    def _validate_intent_requirements(self, intent: str, data: Dict[str, Any]) -> None:
-        """Ensure required fields exist for each intent."""
-        missing_booking_id = (
-            intent in ["cancel_booking", "retrieve_booking"]
-            and "booking_id" not in data
-        )
-        if missing_booking_id:
-            raise ValueError(f"Booking ID is required for {intent}")
-
-        missing_profession = (intent == "create_booking") and ("profession" not in data)
-        if missing_profession:
-            raise ValueError("Profession is required for booking creation")
-
-    def _interpret_text(self, prompt: str) -> str:
-        """
-        Process a prompt using the text interpretation LLM.
-
-        This is the core method for extracting structured information from
-        natural language text. It provides a consistent interface for all
-        LLM-based text interpretation tasks.
-
-        Args:
-            prompt (str): Formatted prompt for the LLM
-
-        Returns:
-            str: The LLM's interpretation result
-
-        Raises:
-            TextInterpretationError: If interpretation fails
-            ValueError: If no LLM is configured
-        """
-        if not self.text_interpreter:
-            raise ValueError("No text interpretation LLM configured")
-
-        try:
-            result = self.text_interpreter(prompt)
-            if not result or not isinstance(result, list):
-                raise TextInterpretationError("Invalid LLM output format")
-
-            return result[0]["generated_text"].strip()
-        except Exception as e:
-            raise TextInterpretationError(f"Text interpretation failed: {e}")
-
-    def _extract_names(self, text: str) -> ExtractedNames:
-        """
-        Extract customer and technician names using the text interpreter.
+        self.candidate_intents = list(self.intent_patterns.keys())
         
-        Args:
-            text (str): The input text to analyze
-            
-        Returns:
-            ExtractedNames: Dataclass containing extracted names
+        self.booking_id_pattern = re.compile(
+            r'\b(?:booking\s+id|booking-id|booking)\s*(?:is|=)?\s*([A-Za-z0-9-]+)\b',
+            re.IGNORECASE
+        )
+        
+        self.profession_patterns = {
+            ProfessionEnum.CARPENTER: r'\b(?:carpenter|woodwork(?:er)?|cabinet\s*maker)\b',
+            ProfessionEnum.CHEF: r'\b(?:chef|cook|culinary|kitchen)\b',
+            ProfessionEnum.DEVELOPER: r'\b(?:developer|programmer|coder|software|web\s*dev)\b',
+            ProfessionEnum.ELECTRICIAN: r'\b(?:electrician|electrical\s*worker)\b',
+            ProfessionEnum.GARDENER: r'\b(?:garden(?:er)?|landscap(?:er|ing)|yard\s*work(?:er)?)\b',
+            ProfessionEnum.MECHANIC: r'\b(?:mechanic|auto\s*tech|car\s*repair)\b',
+            ProfessionEnum.NURSE: r'\b(?:nurse|nursing|health\s*care|medical)\b',
+            ProfessionEnum.PAINTER: r'\b(?:paint(?:er)?|decorat(?:or|ing))\b',
+            ProfessionEnum.PLUMBER: r'\b(?:plumb(?:er|ing)|pipe\s*fitt(?:er|ing))\b',
+            ProfessionEnum.TEACHER: r'\b(?:teach(?:er)?|tutor|instructor|educator)\b',
+            ProfessionEnum.WELDER: r'\b(?:weld(?:er|ing)|metal\s*work(?:er)?)\b'
+        }
+
+    def _is_gpu_available(self) -> bool:
         """
-        prompt = f"""
-    Extract the customer and technician names from this booking request. 
-    If a name isn't found, output 'None'.
+        Checks if a GPU is available for model inference.
 
-    Example Input: "I'm John Smith and I need electrician Mike Brown"
-    Example Output: CUSTOMER: John Smith | TECHNICIAN: Mike Brown
-
-    Example Input: "Book a plumber for tomorrow"
-    Example Output: CUSTOMER: None | TECHNICIAN: None
-
-    Input: {text}
-    Output:""".strip()
-
+        Returns:
+            bool: True if GPU is available, False otherwise.
+        """
         try:
-            interpretation = self._interpret_text(prompt)
-            customer_part, technician_part = interpretation.split("|")
+            import torch
+            return torch.cuda.is_available()
+        except ImportError:
+            logger.warning("Torch not installed. Running on CPU.")
+            return False
+
+    def classify_intent(self, text: str) -> Tuple[str, Dict[str, float]]:
+        """
+        Enhanced intent classification using pattern matching and zero-shot classification.
+        """
+        logger.debug(f"Classifying intent for text: '{text}'")
+        text_lower = text.lower()
+        
+        # First try pattern matching
+        pattern_scores = {}
+        for intent, patterns in self.intent_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, text_lower):
+                    pattern_scores[intent] = pattern_scores.get(intent, 0) + 1
+
+        if pattern_scores:
+            # Found pattern matches
+            max_matches = max(pattern_scores.values())
+            matching_intents = [i for i, s in pattern_scores.items() if s == max_matches]
             
-            # Clean up the extracted names
-            customer_name = customer_part.split("CUSTOMER:")[1].strip()
-            technician_name = technician_part.split("TECHNICIAN:")[1].strip()
+            if len(matching_intents) == 1:
+                # Clear pattern match
+                logger.info(f"Clear pattern match found for intent: {matching_intents[0]}")
+                return matching_intents[0], {intent: 1.0 if intent == matching_intents[0] else 0.0 
+                                        for intent in self.candidate_intents}
+        
+        # Use zero-shot classification with better prompting
+        try:
+            # Create candidate labels with descriptions
+            candidate_labels = []
+            label_map = {}
             
-            return ExtractedNames(
-                customer_name=None if customer_name == "None" else customer_name,
-                technician_name=None if technician_name == "None" else technician_name
+            for intent, descriptions in self.intent_descriptions.items():
+                for desc in descriptions:
+                    candidate_labels.append(desc)
+                    label_map[desc] = intent
+
+            # Run classification with multi_label=False to force single intent
+            result = self.intent_classifier(
+                text,
+                candidate_labels,
+                hypothesis_template="This request is about {}.",
+                multi_label=False
             )
+            
+            # Aggregate scores by intent
+            intent_scores = {}
+            for label, score in zip(result['labels'], result['scores']):
+                intent = label_map[label]
+                intent_scores[intent] = max(intent_scores.get(intent, 0), score)
+                
+            # Boost pattern-matched intents
+            if pattern_scores:
+                for intent in pattern_scores:
+                    intent_scores[intent] = min(1.0, intent_scores.get(intent, 0) * 1.5)
+
+            # Get highest scoring intent
+            max_intent = max(intent_scores.items(), key=lambda x: x[1])[0]
+            
+            # Normalize scores
+            total = sum(intent_scores.values())
+            intent_scores = {k: v/total for k, v in intent_scores.items()}
+            
+            logger.info(f"Classified intent: {max_intent} with scores {intent_scores}")
+            return max_intent, intent_scores
+                
         except Exception as e:
-            logger.error(f"Name extraction failed: {e}")
-            return ExtractedNames()
+            logger.error(f"Intent classification failed: {e}")
+            return "unknown", {intent: 0.0 for intent in self.candidate_intents}
 
-    def _process_ner_results(self, ner_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def extract_entities(
+        self, text: str
+    ) -> Tuple[Optional[ProfessionEnum], Optional[str], Optional[datetime], Optional[str]]:
         """
-        Process named entity recognition results to extract names and roles.
-        Combines direct text analysis with NER results for robust entity extraction.
+        Enhanced entity extraction with better profession and datetime handling.
         """
-        extracted = {}
-        text_markers = []
-        text_lower = " ".join(word.lower() for item in ner_results for word in item["word"].split())
-        
-        # Step 1: First pass to collect person entities
-        for item in ner_results:
-            if item["entity_group"] == "PER":
-                # Check for self-introduction at the start
-                is_self_intro = item["start"] <= 5
-                if is_self_intro:
-                    extracted["customer_name"] = item["word"]
-                else:
-                    text_markers.append({
-                        "type": "person",
-                        "word": item["word"],
-                        "position": item["start"]
-                    })
-        
-        # Step 2: Direct profession detection from text using settings keywords
-        for profession, keywords in settings.PROFESSION_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
-                extracted["profession"] = profession
-                # Find position of matched keyword
-                keyword_pos = next(
-                    text_lower.find(keyword) 
-                    for keyword in keywords 
-                    if keyword in text_lower
-                )
-                
-                # Look for technician after profession mention
-                for marker in text_markers:
-                    if marker["position"] > keyword_pos:
-                        extracted["technician_name"] = marker["word"]
-                        break
-                break
-        
-        # Step 3: If no technician was found but we have other names
-        if "technician_name" not in extracted and text_markers:
-            # If customer isn't set, first person is customer
-            if "customer_name" not in extracted:
-                extracted["customer_name"] = text_markers[0]["word"]
-                # If there's a second person, they're the technician
-                if len(text_markers) > 1:
-                    extracted["technician_name"] = text_markers[1]["word"]
-            else:
-                # If customer is set, other person is technician
-                extracted["technician_name"] = text_markers[0]["word"]
-        
-        logger.debug(f"Processed NER results: {extracted}")
-        return extracted
-
-    def _extract_entities(self, text: str) -> Dict[str, Any]:
-        """
-        Extract all booking-related entities from input text.
-        Combines NER, profession detection, and datetime parsing.
-        """
-        entities: Dict[str, Any] = {}
-
+        logger.debug(f"Extracting entities from text: '{text}'")
         try:
-            # Extract booking ID first
-            booking_id = self._extract_booking_id(text)
-            if booking_id:
-                entities["booking_id"] = booking_id
+            entities = self.ner_pipeline(text)
+            
+            # Initialize return values
+            profession = self.extract_profession(text)  # Extract profession first
+            technician_name = None
+            date_time = None
+            booking_id = None
 
-            # Process NER results for names and professions
-            if self.ner_pipeline:
-                ner_results = self.ner_pipeline(text)
-                extracted = self._process_ner_results(ner_results)
-                entities.update(extracted)
-                
-                # Directly check text for profession if not found through NER
-                if "profession" not in entities:
-                    text_lower = text.lower()
-                    for profession, keywords in settings.PROFESSION_KEYWORDS.items():
-                        if any(keyword in text_lower for keyword in keywords):
-                            entities["profession"] = profession
-                            logger.debug(f"Found profession through keyword match: {profession}")
-                            break
+            # Extract PERSON entities
+            persons = [ent['word'] for ent in entities if ent['entity_group'] == 'PER']
+            if persons:
+                technician_name = ' '.join(persons)
+                logger.info(f"Extracted technician name: {technician_name}")
+            else:
+                technician_name = "Anonymous Technician"
+                logger.info("Using default technician name")
 
-            # Extract datetime
-            try:
-                dt = self.datetime_extractor.extract_datetime(text)
-                if dt:
-                    entities["start_time"] = dt
-                    entities["duration"] = timedelta(hours=1)
-            except DateTimeExtractionError as e:
-                logger.warning(f"DateTime extraction failed: {e}")
-                next_hour = BusinessHours.adjust_to_business_hours(datetime.now())
-                entities["start_time"] = next_hour
-                entities["duration"] = timedelta(hours=1)
+            # Extract datetime entities with better handling
+            date_entities = [ent['word'] for ent in entities if ent['entity_group'] == 'DATE']
+            time_entities = [ent['word'] for ent in entities if ent['entity_group'] == 'TIME']
+            
+            datetime_str = f"{' '.join(date_entities)} {' '.join(time_entities)}".strip()
 
-            logger.debug(f"Extracted entities: {entities}")
-            return entities
+            if datetime_str:
+                try:
+                    extracted_datetime = self.datetime_extractor.extract_datetime_entities(
+                        {"date": ' '.join(date_entities), "time": ' '.join(time_entities)},
+                        datetime_str
+                    )
+                    date_time = extracted_datetime.get("start_time")
+                    if date_time:
+                        logger.info(f"Extracted datetime: {date_time}")
+                except DateTimeExtractionError as e:
+                    logger.error(f"Failed to parse explicit datetime: {e}")
+
+            # If no datetime found, try parsing from full text
+            if not date_time:
+                try:
+                    extracted = self.datetime_extractor.extract_datetime_entities({}, text)
+                    date_time = extracted.get("start_time")
+                    if date_time:
+                        logger.info(f"Extracted datetime from full text: {date_time}")
+                except DateTimeExtractionError as e:
+                    logger.error(f"Failed to parse datetime from full text: {e}")
+
+            # Extract booking ID
+            booking_id_match = self.booking_id_pattern.search(text)
+            if booking_id_match:
+                booking_id = booking_id_match.group(1)
+                logger.info(f"Extracted booking ID: {booking_id}")
+
+            # Log extraction results
+            logger.info(f"Extraction results - Profession: {profession}, "
+                       f"Technician: {technician_name}, "
+                       f"DateTime: {date_time}, "
+                       f"BookingID: {booking_id}")
+
+            return profession, technician_name, date_time, booking_id
 
         except Exception as e:
             logger.error(f"Entity extraction failed: {e}")
-            raise ValueError(f"Failed to extract entities: {e}")
+            return None, None, None, None
 
-    def _extract_booking_id(self, text: str) -> Optional[str]:
+    def extract_profession(self, text: str) -> Optional[ProfessionEnum]:
         """
-        Extract booking ID from the text.
-
-        1) Try matching UUIDs (e.g. 'b56a726a-4ec2-4681-8fd4-b51ff2c19c19').
-        2) Fall back to numeric patterns (e.g., 'booking 123').
-        3) If still not found, check if user typed 'cancel ...', 'retrieve ...', etc.
-        and forcibly parse any standalone number.
+        Enhanced profession extraction using regex patterns.
+        
+        Args:
+            text (str): Input text to analyze
+            
+        Returns:
+            ProfessionEnum or None: Extracted profession if found
         """
         text_lower = text.lower()
-
-        # 1) Match typical UUID
-        uuid_pattern = r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-        match_uuid = re.search(uuid_pattern, text, re.IGNORECASE)
-        if match_uuid:
-            return match_uuid.group(0)  # entire UUID
-
-        # 2) Additional numeric patterns
-        patterns = [
-            r"booking\s*#?\s*(\d+)",
-            r"id\s*#?\s*(\d+)",
-            r"#\s*(\d+)",
-            r"\bid\s*(\d+)\b",
-        ]
-        for pat in patterns:
-            m = re.search(pat, text, re.IGNORECASE)
-            if m:
-                return m.group(1)
-
-        # 3) If user said e.g. "retrieve booking 123", forcibly parse any standalone number
-        if any(
-            k in text_lower
-            for k in ["cancel", "booking", "retrieve", "find", "details"]
-        ):
-            m2 = re.search(r"\b(\d+)\b", text)
-            if m2:
-                return m2.group(1)
-
-        return None
-
-    # -------------------------------------------------------------------------
-    # Date/Time Parsing
-    # -------------------------------------------------------------------------
-    def _assign_time(self, time_str: str, entities: Dict[str, Any]) -> None:
-        """
-        Attempt to parse time_str via:
-          1) LLM pipeline -> ISO string -> datetime
-          2) Fallback to local _parse_time
-        """
-        if self.date_time_llm:
-            try:
-                iso_result = self._interpret_datetime_with_llm(time_str)
-                dt_val = datetime.strptime(iso_result, "%Y-%m-%d %H:%M")
-                if dt_val < datetime.now():
-                    dt_val += timedelta(days=7)
-                entities["start_time"] = dt_val
-                return
-            except Exception as e:
-                logger.warning(f"LLM parse failed for '{time_str}': {e}")
-
-        # fallback
-        try:
-            dt_val = self._parse_time(time_str)
-            entities["start_time"] = dt_val
-        except ValueError as ve:
-            logger.debug(f"Fallback parse_time failed: {ve}")
-
-    def _interpret_datetime_with_llm(self, date_expression: str) -> str:
-        """
-        text2text-generation call to convert user expression -> 'YYYY-MM-DD HH:MM'
-        """
-        if not self.date_time_llm:
-            raise ValueError("No date_time_llm pipeline configured")
-
-        prompt = f"""
-Convert the following date/time expression into a future date/time in format YYYY-MM-DD HH:MM.
-Expression: {date_expression}
-""".strip()
-
-        result = self.date_time_llm(prompt)
-        if not result or not isinstance(result, list):
-            raise ValueError(f"Invalid LLM result for '{date_expression}'")
-        return result[0].get("generated_text", "").strip()
-
-    def _parse_time(self, time_str: str) -> datetime:
-        """
-        Parse a partial time expression like "Friday at 3 PM" into a guaranteed *future* datetime:
-
-        1) Identify if user typed a weekday (mon, fri...), then compute the next occurrence from 'now'.
-        2) Otherwise rely on dateutil parsing, anchored to the current date/time.
-        3) Force minutes/seconds to 0 if the user didn't specify them (i.e., "3 PM" => 15:00 not 15:27).
-        4) If final_dt is still < now, add 1 day or raise an error as needed.
-        """
-
-        now = datetime.now()
-        day_idx = self._extract_weekday(time_str)
-
-        # Step A: Let dateutil parse hour/minute if present, fallback to now
-        try:
-            dt_approx = parse(time_str, fuzzy=True, default=now)
-        except Exception as ex:
-            raise ValueError(f"Could not parse time from '{time_str}': {ex}")
-
-        # Step B: If a weekday is mentioned, override the date portion
-        if day_idx is not None:
-            future_day = self._next_weekday(now, day_idx)
-            final_dt = future_day.replace(
-                hour=dt_approx.hour,
-                minute=dt_approx.minute,
-                second=dt_approx.second,
-                microsecond=0,
-            )
-        else:
-            final_dt = dt_approx
-
-        # Step C: If user typed "3 pm" or "2am" with no colon,
-        #         forcibly set minute=0, second=0 to avoid "3:27 pm" or "2:58 am".
-        #         We'll detect if there's no colon (:) or dot (.) in the expression.
-        normalized = time_str.lower()
-        if re.search(r"\b(\d{1,2})\s*[ap]\.?m\.?\b", normalized):
-            # This means user typed something like "3 pm" (with NO :xx in it).
-            if not re.search(r"[:.]\d{1,2}", normalized):
-                # No mention of minutes => default minute=0
-                final_dt = final_dt.replace(minute=0, second=0, microsecond=0)
-
-        # Step D: If final_dt < now, we push it forward by a day (or 7 days for next occurrence).
-        if final_dt < now:
-            final_dt += timedelta(days=1)
-            if final_dt < now:
-                raise ValueError(f"Parsed time '{final_dt}' is still in the past.")
-
-        logger.debug(f"_parse_time => '{time_str}' => {final_dt}")
-        return final_dt
-
-    def _extract_weekday(self, text: str) -> Optional[int]:
-        """
-        Return int for Monday=0..Sunday=6 if matched, else None.
-        """
-        mapping = {
-            "mon": 0,
-            "monday": 0,
-            "tue": 1,
-            "tues": 1,
-            "tuesday": 1,
-            "wed": 2,
-            "weds": 2,
-            "wednesday": 2,
-            "thu": 3,
-            "thur": 3,
-            "thurs": 3,
-            "thursday": 3,
-            "fri": 4,
-            "friday": 4,
-            "sat": 5,
-            "saturday": 5,
-            "sun": 6,
-            "sunday": 6,
-        }
-        lowered = text.lower()
-        for k, idx in mapping.items():
-            if re.search(rf"\b{k}\b", lowered):
-                return idx
-        return None
-
-    def _next_weekday(self, now: datetime, weekday_target: int) -> datetime:
-        """
-        Return the next future occurrence of e.g. weekday=4 (Friday).
-        If 'now' is that weekday, skip to next week.
-        """
-        current_wday = now.weekday()
-        diff = weekday_target - current_wday
-        if diff <= 0:
-            diff += 7
-        return now + timedelta(days=diff)
-
-    # -------------------------------------------------------------------------
-    # Data Enrichment
-    # -------------------------------------------------------------------------
-    def _enrich_data(
-        self, intent: str, entities: Dict[str, Any], text: str
-    ) -> Dict[str, Any]:
-        """Add defaults (profession/time) for 'create_booking' or other logic."""
-        enriched = dict(entities)  # shallow copy
-        enriched.setdefault("timestamp", datetime.now().isoformat())
-        enriched.setdefault("source", settings.DATA_SOURCE)
-
-        if intent == "create_booking":
-            # Possibly fill with default time if none
-            if "start_time" not in enriched:
-                enriched["start_time"] = self._default_booking_time()
-
-        return enriched
-
-    def _ensure_profession(self, data: Dict[str, Any], text: str) -> None:
-        """If no 'profession' field, attempt to detect or set default."""
-        if "profession" not in data or not data["profession"]:
-            guess = self._detect_profession(text)
-            data["profession"] = guess if guess else settings.DEFAULT_PROFESSION
-
-    def _default_booking_time(self) -> datetime:
-        """
-        If no time extracted, schedule for next hour or next day if it's too late.
-        """
-        now = datetime.now()
-        if now.hour >= settings.LAST_BOOKING_HOUR:
-            return now.replace(
-                hour=settings.DEFAULT_BOOKING_HOUR, minute=0, second=0
-            ) + timedelta(days=1)
-        return now.replace(hour=now.hour + 1, minute=0, second=0)
-
-    def _detect_profession(self, text: str) -> Optional[str]:
-        """
-        Scan the text for known profession keywords if none found in NER.
-        """
-        lower_text = text.lower()
-        for profession, keywords in settings.PROFESSION_KEYWORDS.items():
-            if any(k.lower() in lower_text for k in keywords):
-                logger.debug(f"Detected profession: {profession}")
+        
+        # Try to match profession patterns
+        for profession, pattern in self.profession_patterns.items():
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                logger.info(f"Matched profession {profession.value} with pattern")
                 return profession
-        logger.debug("No profession found in text.")
+                
+        logger.debug("No profession pattern matched")
         return None
 
-    def __repr__(self) -> str:
-        """For debugging/logging introspection."""
-        return (
-            f"NLPService("
-            f"device={self.device_name}, "
-            f"intent_model={settings.ZERO_SHOT_MODEL_NAME}, "
-            f"ner_model={settings.NER_MODEL_NAME}, "
-            f"date_time_model={settings.TEXT_TO_TEXT_MODEL_NAME})"
-        )
+    def handle_message(
+    self, message: str, customer_name: str = "Anonymous Customer"
+) -> MessageResponse:
+        """
+        Processes the user's message with improved error handling.
+        Always returns a MessageResponse object.
+        """
+        try:
+            logger.info(f"Handling message: '{message}' from customer: '{customer_name}'")
+            
+            # Get intent and scores
+            intent, intent_scores = self.classify_intent(message)
+            
+            if not intent_scores:
+                logger.warning("No intent scores received")
+                return MessageResponse(
+                    response="I couldn't understand that request. Could you please rephrase it?",
+                    intent_scores={"unknown": 1.0}
+                )
+                
+            # Extract entities with proper error handling
+            try:
+                profession, technician_name, date_time, booking_id = self.extract_entities(message)
+            except Exception as e:
+                logger.error(f"Entity extraction failed: {e}")
+                return MessageResponse(
+                    response=f"I had trouble understanding the details of your request: {str(e)}",
+                    intent_scores=intent_scores
+                )
+
+            # Handle each intent
+            if intent == "create_booking":
+                # Set up default datetime if none extracted
+                if not date_time:
+                    tomorrow = datetime.now(settings.TIMEZONE_OBJ) + timedelta(days=1)
+                    date_time = tomorrow.replace(
+                        hour=settings.DEFAULT_BOOKING_HOUR,
+                        minute=0,
+                        second=0,
+                        microsecond=0
+                    )
+                    logger.info(f"Using default booking time: {date_time}")
+
+                # Validate booking time
+                current_time = datetime.now(settings.TIMEZONE_OBJ)
+                if date_time <= current_time:
+                    return MessageResponse(
+                        response="Cannot book a technician in the past.",
+                        intent_scores=intent_scores
+                    )
+
+                try:
+                    booking_create = BookingCreate(
+                        customer_name=customer_name,
+                        technician_name=technician_name,
+                        profession=profession,
+                        start_time=date_time
+                    )
+
+                    booking_response = create_booking(booking_create)
+                    formatted_time = booking_response.start_time.strftime("%A at %I:%M %p")
+                    response = f"Booking confirmed for {formatted_time} with {booking_response.technician_name} (ID: {booking_response.id})"
+                    logger.info(f"Booking created successfully: {response}")
+                    return MessageResponse(response=response, intent_scores=intent_scores)
+                except ValueError as ve:
+                    error_msg = f"Failed to create booking: {str(ve)}"
+                    logger.error(error_msg)
+                    return MessageResponse(response=error_msg, intent_scores=intent_scores)
+
+            elif intent == "query_booking":
+                if not booking_id:
+                    return MessageResponse(
+                        response="Please provide your booking ID to retrieve details.",
+                        intent_scores=intent_scores
+                    )
+
+                booking = get_booking_by_id(booking_id)
+                if booking:
+                    formatted_time = booking.start_time.strftime("%A at %I:%M %p")
+                    response = f"Your booking ID is {booking.id} for a {booking.profession} on {formatted_time}."
+                    return MessageResponse(response=response, intent_scores=intent_scores)
+                else:
+                    return MessageResponse(
+                        response=f"No booking found with ID {booking_id}.",
+                        intent_scores=intent_scores
+                    )
+
+            elif intent == "cancel_booking":
+                if not booking_id:
+                    return MessageResponse(
+                        response="Please provide the booking ID you wish to cancel.",
+                        intent_scores=intent_scores
+                    )
+
+                success = cancel_booking(booking_id)
+                if success:
+                    return MessageResponse(
+                        response=f"Booking ID {booking_id} cancelled successfully.",
+                        intent_scores=intent_scores
+                    )
+                else:
+                    return MessageResponse(
+                        response=f"No booking found with ID {booking_id} to cancel.",
+                        intent_scores=intent_scores
+                    )
+
+            elif intent == "list_bookings":
+                bookings = get_all_bookings()
+                if bookings:
+                    response = "Here are all your bookings:\n"
+                    for booking in bookings:
+                        response += f"- ID: {booking.id}, Technician: {booking.technician_name}, "
+                        response += f"Profession: {booking.profession}, "
+                        response += f"Start: {booking.start_time.strftime('%Y-%m-%d %I:%M %p')}\n"
+                    return MessageResponse(response=response, intent_scores=intent_scores)
+                else:
+                    return MessageResponse(
+                        response="You have no bookings at the moment.",
+                        intent_scores=intent_scores
+                    )
+
+            else:
+                logger.warning(f"Unrecognized intent: {intent}")
+                return MessageResponse(
+                    response="I'm sorry, I didn't understand that request. Could you please rephrase it?",
+                    intent_scores=intent_scores
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling message: {str(e)}", exc_info=True)
+            return MessageResponse(
+                response=f"An error occurred while processing your request: {str(e)}",
+                intent_scores={"error": 1.0}
+            )
 
 
-# Initialize a global (singleton) instance if desired
-try:
+# Create a global NLPService instance to be imported by other modules
+nlp_service = NLPService()
+
+
+# Example Usage (For Testing Purposes)
+if __name__ == "__main__":
+    # Configure basic logging for testing
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
     nlp_service = NLPService()
-except Exception as e:
-    logger.critical(f"Failed to initialize NLPService: {e}")
-    raise
+
+    # Sample Inputs
+    test_messages = [
+        "I want to book a gardener for tomorrow",
+        "What is my booking ID?",
+        "cancel booking 123e4567-e89b-12d3-a456-426614174000",
+        "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak.",
+        "Schedule welder James Brown for Friday at 10 AM for metal work.",
+        "I need electrician Bob Wilson on Monday at 9 AM.",
+        "Book carpenter Emily White for Saturday at 3 PM to build a cabinet.",
+        "Schedule mechanic Robert Miller on Tuesday at 5 PM for a car check.",
+        "Book painter Lisa Davis for Thursday at 11 AM to repaint my living room.",
+        "Schedule chef Daniel Martinez for Sunday at 7 PM for dinner.",
+        "Book gardener Nancy Clark for Friday at 8 AM for landscaping.",
+        "Schedule teacher Samuel Harris for Monday at 6 PM for tutoring.",
+        "Book developer Laura Evans for Wednesday at 4 PM for a project.",
+        "Schedule nurse Kevin Adams for Saturday at 9 AM for home care.",
+        "List all bookings",
+    ]
+
+    for msg in test_messages:
+        print(f"User: {msg}")
+        response = nlp_service.handle_message(msg)
+        print(f"> {response.response}")
+        print("Intent Classification Scores:")
+        for intent, score in response.intent_scores.items():
+            print(f"  - {intent}: {score:.4f}")
+        print()

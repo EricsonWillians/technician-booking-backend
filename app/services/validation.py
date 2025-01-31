@@ -19,7 +19,6 @@ from zoneinfo import ZoneInfo
 from app.config.settings import settings
 from app.models.booking import Booking
 
-
 def validate_booking_time(
     start_time: datetime,
     end_time: Optional[datetime] = None,
@@ -27,7 +26,24 @@ def validate_booking_time(
     existing_bookings: Optional[Dict[str, Booking]] = None,
     system_init: bool = False
 ) -> None:
+    """
+    Validates booking time constraints, ensuring that:
+    - The start time is in the future (unless `system_init` is True)
+    - Bookings are exactly 1 hour long
+    - No scheduling conflicts exist for the technician
+    """
+
+    # Ensure start_time is timezone-aware
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=ZoneInfo(settings.TIMEZONE))
+
+    # Ensure current_time is timezone-aware
     current_time = datetime.now(ZoneInfo(settings.TIMEZONE))
+
+    # Ensure end_time is timezone-aware if provided
+    if end_time and end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=ZoneInfo(settings.TIMEZONE))
+
     if not system_init and start_time < current_time:
         raise ValueError("Cannot book a technician in the past.")
 

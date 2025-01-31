@@ -1,22 +1,8 @@
-"""
-==========================================================
-                BOOKING SCHEMA MODULE
-==========================================================
-
-  Pydantic schemas for the Technician Booking System, 
-  providing data validation and structure for both API 
-  interactions and internal service operations.
-
-  Author : Ericson Willians  
-  Email  : ericsonwillians@protonmail.com  
-  Date   : January 2025  
-
-==========================================================
-"""
+# app/schemas/booking.py
 
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
-from app.config.settings import settings
+from pydantic import BaseModel, Field, ConfigDict
+from app.models.professions import ProfessionEnum
 
 
 class BookingBase(BaseModel):
@@ -35,7 +21,7 @@ class BookingBase(BaseModel):
         example="Nicolas Woollett",
         description="Name of the technician performing the service"
     )
-    profession: str = Field(
+    profession: ProfessionEnum = Field(
         ...,
         example="Plumber",
         description="Professional qualification of the technician"
@@ -46,20 +32,9 @@ class BookingBase(BaseModel):
         description="Scheduled start time of the service"
     )
 
-    @field_validator('profession')
-    def validate_profession(cls, v):
-        """
-        Validate that the profession is supported by checking against
-        the professions defined in application settings.
-        """
-        allowed_professions = {prof.title() for prof in settings.PROFESSION_KEYWORDS.keys()}
-        normalized_profession = v.title()  # Handle case-sensitivity
-        
-        if normalized_profession not in allowed_professions:
-            raise ValueError(
-                f"Profession must be one of: {', '.join(sorted(allowed_professions))}"
-            )
-        return normalized_profession
+    model_config = ConfigDict(
+        extra='forbid'  # Forbid extra fields not defined in the model
+    )
 
 
 class BookingCreate(BookingBase):

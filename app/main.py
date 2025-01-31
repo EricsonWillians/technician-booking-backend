@@ -1,170 +1,176 @@
+# app/main.py
+
 """
 ==========================================================
           TECHNICIAN BOOKING SYSTEM - API ENTRY POINT
 ==========================================================
 
-  Defines the FastAPI application entry point for the  
-  Technician Booking System.
+Production-grade FastAPI application entry point with:
+- Robust error handling
+- CORS configuration
+- Health monitoring
+- Graceful shutdown
+- Structured logging
+- Environment-based configuration
 
-  Features:
-  - FastAPI initialization with CORS setup  
-  - Metadata and versioning configuration  
-  - Router inclusion for managing bookings  
-  - Startup event to load initial data  
-  - General error handling with structured responses  
-  - Health check endpoint for monitoring  
-
-  Author : Ericson Willians  
-  Email  : ericsonwillians@protonmail.com  
-  Date   : January 2025  
+Author : Ericson Willians  
+Email  : ericsonwillians@protonmail.com  
+Date   : January 2025  
 
 ==========================================================
 """
 
 import logging
-from fastapi import FastAPI, Request, HTTPException
+import sys
+from typing import Dict, Any
+from datetime import datetime
+
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
+from fastapi.exceptions import RequestValidationError
+
 from app.config.settings import settings
 from app.core.initial_data import load_initial_data
-from app.routers.bookings import router as bookings_router
+from app.routers.bookings import router as bookings_router, APIResponse, ErrorDetail
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO if settings.DEBUG else logging.WARNING,
+    level=settings.LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("technician_booking_api")
 
 def create_app() -> FastAPI:
-    """
-    Create and configure the FastAPI application instance.
-
-    Returns:
-        FastAPI: A fully configured FastAPI application.
-    """
+    """Initialize and configure the FastAPI application."""
     app = FastAPI(
         title="Technician Booking System",
-        description=(
-            "A system to schedule, retrieve, and cancel technician "
-            "bookings, featuring an NLP-based console interface."
-        ),
-        version=settings.APP_VERSION,  # e.g., "0.1.0"
-        docs_url="/docs" if settings.DEBUG else None,  # Disable docs in production if desired
-        redoc_url="/redoc" if settings.DEBUG else None,  # Disable redoc in production if desired
-        openapi_url="/openapi.json" if settings.DEBUG else None  # Control OpenAPI schema visibility
+        description="Advanced booking system with NLP capabilities for technician scheduling.",
+        version="1.0.0",
+        docs_url="/docs" if settings.DEBUG else None,
+        redoc_url="/redoc" if settings.DEBUG else None
     )
 
-    # CORS Configuration
-    if settings.CORS_ORIGINS:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.CORS_ORIGINS,  # List of allowed origins or ["*"]
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        logger.info(f"CORS enabled for origins: {settings.CORS_ORIGINS}")
+    # CORS setup
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[str(origin) for origin in settings.CORS_ORIGINS],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-    # Register Event Handlers
+    # Register startup event
     @app.on_event("startup")
     async def startup_event() -> None:
-        """
-        Define startup logic for the FastAPI application.
-
-        This event hook can be used to:
-          - Initialize or seed in-memory data
-          - Establish database connections
-          - Perform any other one-time setup
-        """
+        """Initialize application state on startup."""
         try:
+            logger.info("Starting Technician Booking System...")
             await load_initial_data()
-            logger.info("Initial data loaded successfully.")
+            logger.info("System initialization complete.")
         except Exception as e:
-            logger.exception("Failed to load initial data during startup.")
-            raise e  # Optionally, you can handle the exception as needed
+            logger.error(f"Failed to initialize system: {str(e)}", exc_info=True)
+            sys.exit(1)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
+        """Clean up resources on shutdown."""
+        logger.info("Shutting down Technician Booking System...")
+        # Add any cleanup tasks here if needed
+
+    # Register routers
+    app.include_router(
+        bookings_router,
+        prefix="/api/v1/bookings",
+        tags=["Bookings"]
+    )
+
+    # Health check endpoint
+    @app.get(
+        "/health",
+        tags=["Health"],
+        response_model=Dict[str, Any],
+        summary="System health check"
+    )
+    async def health_check() -> Dict[str, Any]:
         """
-        Define shutdown logic for the FastAPI application.
-
-        This event hook can be used to:
-          - Close database connections
-          - Clean up resources
+        Health check endpoint with system status information.
         """
-        logger.info("Shutting down the Technician Booking System.")
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "version": app.version,
+            "environment": settings.ENV
+        }
 
-    # Register Routers
-    app.include_router(bookings_router, prefix="/bookings", tags=["Bookings"])
-    logger.info("Bookings router included with prefix '/bookings'.")
+    # Enhanced error handlers
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Handle request validation errors."""
+        errors = []
+        for error in exc.errors():
+            errors.append({
+                "loc": " -> ".join(str(loc) for loc in error["loc"]),
+                "msg": error["msg"],
+                "type": error["type"]
+            })
 
-    # Health Check Endpoint
-    @app.get("/health", tags=["Health"])
-    async def health_check() -> dict:
-        """
-        Health check endpoint to verify that the application is running.
-
-        Returns:
-            dict: A simple status message.
-        """
-        return {"status": "healthy"}
-
-    # General Exception Handlers
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        """
-        Handle HTTP exceptions and return JSON responses.
-
-        Args:
-            request (Request): The incoming request.
-            exc (HTTPException): The exception raised.
-
-        Returns:
-            JSONResponse: A JSON response with error details.
-        """
-        logger.warning(f"HTTPException: {exc.detail} (status code: {exc.status_code})")
         return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": exc.detail},
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=APIResponse(
+                success=False,
+                error=ErrorDetail(
+                    code="VALIDATION_ERROR",
+                    message="Request validation failed",
+                    details={"errors": errors},
+                    timestamp=datetime.now()
+                )
+            ).dict()
         )
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
-        """
-        Handle unexpected exceptions and return a generic error response.
+        """Handle unexpected exceptions."""
+        error_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        logger.error(
+            f"Unhandled exception {error_id}: {str(exc)}",
+            exc_info=True,
+            extra={
+                "error_id": error_id,
+                "url": str(request.url),
+                "method": request.method,
+            }
+        )
 
-        Args:
-            request (Request): The incoming request.
-            exc (Exception): The exception raised.
-
-        Returns:
-            JSONResponse: A JSON response with a generic error message.
-        """
-        logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
         return JSONResponse(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "An unexpected error occurred. Please try again later."},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=APIResponse(
+                success=False,
+                error=ErrorDetail(
+                    code="INTERNAL_ERROR",
+                    message="An unexpected error occurred",
+                    details={
+                        "error_id": error_id,
+                        "support_message": "Please contact support with this error ID"
+                    },
+                    timestamp=datetime.now()
+                )
+            ).dict()
         )
 
     return app
 
-
-# Create the global app instance
+# Create application instance
 app = create_app()
 
-# Run the application if this file is executed directly
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "app.main:app",
-        host=settings.HOST,  # e.g., "0.0.0.0"
-        port=settings.PORT,  # e.g., 8000
-        reload=settings.DEBUG,  # Enable reload in development
-        log_level="debug" if settings.DEBUG else "warning",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL.lower(),
+        access_log=settings.DEBUG
     )
