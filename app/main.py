@@ -32,7 +32,8 @@ from fastapi.exceptions import RequestValidationError
 
 from app.config.settings import settings
 from app.core.initial_data import load_initial_data
-from app.routers.bookings import router as bookings_router, APIResponse, ErrorDetail
+from app.routers.bookings import router as bookings_router
+from app.schemas.response import APIResponse, ErrorDetail
 
 # Configure logging
 logging.basicConfig(
@@ -99,12 +100,11 @@ def create_app() -> FastAPI:
         """
         return {
             "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "version": app.version,
             "environment": settings.ENV
         }
 
-    # Enhanced error handlers
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         """Handle request validation errors."""
@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
                     code="VALIDATION_ERROR",
                     message="Request validation failed",
                     details={"errors": errors},
-                    timestamp=datetime.now()
+                    timestamp=datetime.utcnow().isoformat() + "Z"  # Ensure string format
                 )
             ).dict()
         )
@@ -132,7 +132,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
         """Handle unexpected exceptions."""
-        error_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        error_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         logger.error(
             f"Unhandled exception {error_id}: {str(exc)}",
             exc_info=True,
@@ -154,7 +154,7 @@ def create_app() -> FastAPI:
                         "error_id": error_id,
                         "support_message": "Please contact support with this error ID"
                     },
-                    timestamp=datetime.now()
+                    timestamp=datetime.utcnow().isoformat() + "Z"  # Ensure string format
                 )
             ).dict()
         )

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional
 from app.models.professions import ProfessionEnum
 
 
@@ -11,8 +12,8 @@ class BookingBase(BaseModel):
     
     Provides core fields and validation shared across booking operations.
     """
-    customer_name: str = Field(
-        ...,
+    customer_name: Optional[str] = Field(
+        "Anonymous Customer",  # Default value
         example="Nicolas Woollett",
         description="Name of the customer requesting the service"
     )

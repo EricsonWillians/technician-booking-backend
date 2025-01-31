@@ -36,7 +36,7 @@ class Booking:
         end_time (datetime): The end time of the scheduled service.
     """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    customer_name: str = ""
+    customer_name: str = "Anonymous Customer"  # Default value
     technician_name: str = ""
     profession: str = ""
     start_time: datetime = datetime.now()

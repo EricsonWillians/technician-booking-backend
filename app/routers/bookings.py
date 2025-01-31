@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from app.services import booking_service
 from app.schemas.booking import BookingCreate, BookingResponse
 from app.services.nlp_service import nlp_service
+from app.schemas.response import APIResponse, ErrorDetail  # Import from the centralized module
 
 # Configure router
 router = APIRouter()
@@ -67,29 +68,25 @@ class CommandResult(BaseModel):
     bookings: Optional[List[BookingResponse]] = Field(None, description="List of bookings")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional response metadata")
 
-class APIResponse(BaseModel):
-    """Standardized API response wrapper."""
-    success: bool = Field(..., description="Operation success status")
-    data: Optional[Any] = Field(None, description="Response data")
-    error: Optional[ErrorDetail] = Field(None, description="Error information if failed")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Response metadata")
-
 def create_error_response(status_code: int, code: str, message: str, details: Optional[Dict] = None) -> JSONResponse:
     """Create a standardized error response with ISO-formatted timestamp."""
     error_detail = ErrorDetail(
         code=code,
         message=message,
         details=details,
-        timestamp=datetime.now().isoformat()
+        timestamp=datetime.utcnow().isoformat() + "Z"
     )
+
+    # Convert `ErrorDetail` explicitly to a dictionary before passing it
     api_response = APIResponse(
         success=False,
-        error=error_detail,
+        error=error_detail.model_dump(),
         metadata={}
     )
+
     return JSONResponse(
         status_code=status_code,
-        content=api_response.dict()
+        content=api_response.model_dump() 
     )
 
 def create_success_response(data: Any, metadata: Optional[Dict] = None) -> APIResponse:
@@ -206,18 +203,20 @@ async def create_booking(booking_data: BookingCreate):
         # Manually construct BookingResponse with ISO-formatted datetime fields
         booking_response_data = {
             "id": new_booking.id,
-            "customer_name": new_booking.customer_name,
+            "customer_name": new_booking.customer_name or "Anonymous Customer",
             "technician_name": new_booking.technician_name,
             "profession": new_booking.profession,
-            "start_time": new_booking.start_time.isoformat(),
-            "end_time": new_booking.end_time.isoformat()
+            "start_time": new_booking.start_time.isoformat(), 
+            "end_time": new_booking.end_time.isoformat()  
         }
-        booking_response = BookingResponse(**booking_response_data)
+
+        booking_response = BookingResponse(**booking_response_data) 
+
         
         return create_success_response(
             data=booking_response,
             metadata={
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.utcnow().isoformat() + "Z",
                 "booking_duration": "1 hour"
             }
         )

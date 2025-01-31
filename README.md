@@ -212,60 +212,1239 @@ DEFAULT_BOOKING_HOUR=9
 LAST_BOOKING_HOUR=17
 ```
 
-## Usage
+# Usage
 
-### CLI Interface
-```bash
-poetry run python -m app.core.cli
-```
+## HTTP API
 
-Example interaction:
-```
-> Book a gardener for tomorrow at 2pm
-
-╭── NLP Analysis ───────────────────────╮
-│ Intent Classification Scores:         │
-│ CREATE_BOOKING: 0.92 ████████████     │
-│ QUERY_BOOKING: 0.05 █                 │
-│ CANCEL_BOOKING: 0.03 █                │
-╰────────────────────────────────────────╯
-```
-
-### HTTP API
 ```bash
 poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## API Endpoints
+The base URL for all endpoints is:
 
-### Booking Creation
-```http
-POST /api/v1/bookings
+```
+http://localhost:8000/api/v1/bookings
+```
 
-Request:
+---
+
+## API Usage Examples
+
+This section provides detailed and formatted examples on how to interact with the **Technician Booking System API** using `cURL`. Each example demonstrates how to perform common operations such as listing bookings, retrieving booking details, creating a new booking, cancelling a booking, and processing natural language commands.
+
+---
+
+### 1. List All Bookings
+
+**Endpoint:**
+
+```
+GET /api/v1/bookings/
+```
+
+**Description:**
+
+Retrieves a list of all existing bookings.
+
+**cURL Command:**
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/bookings/" \
+     -H "Accept: application/json"
+```
+
+**Sample Response:**
+
+```json
 {
-    "customer_name": "John Doe",
-    "technician_name": "Alice Smith",
-    "profession": "Gardener",
-    "start_time": "2025-02-01T14:00:00Z"
-}
-
-Response:
-{
-    "success": true,
-    "data": {
-        "id": "550e8400-e29b-41d4-a716-446655440000",
-        "customer_name": "John Doe",
-        "technician_name": "Alice Smith",
-        "profession": "Gardener",
-        "start_time": "2025-02-01T14:00:00Z",
-        "end_time": "2025-02-01T15:00:00Z"
+  "success": true,
+  "data": [
+    {
+      "id": "87963f8a-9915-4e1d-9eda-629a3ae948dc",
+      "technician_name": "Alice Smith",
+      "profession": "Plumber",
+      "start_time": "2025-02-01T14:00:00Z",
+      "end_time": "2025-02-01T15:00:00Z"
     },
-    "metadata": {
-        "processed_at": "2025-01-31T14:30:00Z"
+    {
+      "id": "4321a2b4-f16a-4cfb-9e47-5206c02a0ca8",
+      "technician_name": "Bob Johnson",
+      "profession": "Electrician",
+      "start_time": "2025-02-02T10:00:00Z",
+      "end_time": "2025-02-02T11:00:00Z"
+    },
+    {
+      "id": "838d3646-855e-46e1-a1be-843f4ebb5f77",
+      "technician_name": "Griselda Dickson",
+      "profession": "Welder",
+      "start_time": "2025-02-03T09:00:00Z",
+      "end_time": "2025-02-03T10:00:00Z"
+    },
+    {
+      "id": "13806ace-540b-464f-8087-87b40c50b37f",
+      "technician_name": "John Do Alice Smith",
+      "profession": "Plumber",
+      "start_time": "2025-02-01T14:00:00Z",
+      "end_time": "2025-02-01T15:00:00Z"
+    },
+    {
+      "id": "43919cc7-01db-4bee-a818-d08d0d01d7a0",
+      "technician_name": "Karen",
+      "profession": "Electrician",
+      "start_time": "2025-02-01T09:00:00Z",
+      "end_time": "2025-02-01T10:00:00Z"
     }
+  ],
+  "error": null,
+  "metadata": {
+    "total_count": 5,
+    "timestamp": "2025-01-31T12:03:47Z"
+  }
 }
 ```
+
+**Sample Response (No Bookings Found):**
+
+```json
+{
+  "success": true,
+  "data": [],
+  "error": null,
+  "metadata": {
+    "total_count": 0,
+    "timestamp": "2025-01-31T12:03:47Z"
+  }
+}
+```
+
+**Sample Response (Error):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKINGS_RETRIEVAL_FAILED",
+    "message": "Failed to retrieve bookings.",
+    "details": null,
+    "timestamp": "2025-01-31T12:03:47Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 2. Retrieve Booking Details
+
+**Endpoint:**
+
+```
+GET /api/v1/bookings/{booking_id}
+```
+
+**Description:**
+
+Retrieves detailed information about a specific booking identified by `booking_id`.
+
+**cURL Command:**
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/bookings/87963f8a-9915-4e1d-9eda-629a3ae948dc" \
+     -H "Accept: application/json"
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "87963f8a-9915-4e1d-9eda-629a3ae948dc",
+    "technician_name": "Alice Smith",
+    "profession": "Plumber",
+    "start_time": "2025-02-01T14:00:00Z",
+    "end_time": "2025-02-01T15:00:00Z"
+  },
+  "error": null,
+  "metadata": {
+    "retrieved_at": "2025-01-31T12:03:47Z"
+  }
+}
+```
+
+**Sample Response (Booking Not Found):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKING_NOT_FOUND",
+    "message": "Booking 87963f8a-9915-4e1d-9eda-629a3ae948dc not found.",
+    "details": null,
+    "timestamp": "2025-01-31T12:03:47Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 3. Create a New Booking
+
+**Endpoint:**
+
+```
+POST /api/v1/bookings/
+```
+
+**Description:**
+
+Creates a new booking with the provided details. Note that `customer_name` is handled internally and does not need to be provided in the request.
+
+**Request Body:**
+
+```json
+{
+  "technician_name": "Alice Smith",
+  "profession": "Plumber",
+  "start_time": "2025-02-01T14:00:00Z"
+}
+```
+
+**cURL Command:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/bookings/" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "technician_name": "Alice Smith",
+           "profession": "Plumber",
+           "start_time": "2025-02-01T14:00:00Z"
+         }'
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "13806ace-540b-464f-8087-87b40c50b37f",
+    "technician_name": "Alice Smith",
+    "profession": "Plumber",
+    "start_time": "2025-02-01T14:00:00Z",
+    "end_time": "2025-02-01T15:00:00Z"
+  },
+  "error": null,
+  "metadata": {
+    "created_at": "2025-01-31T14:40:00Z",
+    "booking_duration": "1 hour"
+  }
+}
+```
+
+**Sample Response (Validation Error - Missing Profession):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKING_CREATION_FAILED",
+    "message": "Profession is required for booking creation.",
+    "details": {
+      "provided_data": {
+        "technician_name": "Alice Smith",
+        "start_time": "2025-02-01T14:00:00Z"
+      }
+    },
+    "timestamp": "2025-01-31T14:40:00Z"
+  },
+  "metadata": {}
+}
+```
+
+**Sample Response (Validation Error - Invalid Start Time):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKING_CREATION_FAILED",
+    "message": "Start time must be in the future.",
+    "details": {
+      "provided_data": {
+        "technician_name": "Alice Smith",
+        "profession": "Plumber",
+        "start_time": "2025-01-30T14:00:00Z"
+      }
+    },
+    "timestamp": "2025-01-31T14:40:00Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 4. Cancel a Booking
+
+**Endpoint:**
+
+```
+DELETE /api/v1/bookings/{booking_id}
+```
+
+**Description:**
+
+Cancels an existing booking identified by `booking_id`.
+
+**cURL Command:**
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/bookings/123e4567-e89b-12d3-a456-426614174000" \
+     -H "Accept: application/json"
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "booking_id": "123e4567-e89b-12d3-a456-426614174000",
+    "status": "cancelled"
+  },
+  "error": null,
+  "metadata": {
+    "cancelled_at": "2025-01-31T14:45:00Z"
+  }
+}
+```
+
+**Sample Response (Booking Not Found):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKING_NOT_FOUND",
+    "message": "Booking 123e4567-e89b-12d3-a456-426614174000 not found.",
+    "details": null,
+    "timestamp": "2025-01-31T14:45:00Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 5. Process a Natural Language Command
+
+**Endpoint:**
+
+```
+POST /api/v1/bookings/commands
+```
+
+**Description:**
+
+Processes a natural language command to perform booking operations such as creating, querying, or cancelling bookings.
+
+**Request Body:**
+
+```json
+{
+  "message": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+}
+```
+
+**cURL Command:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/bookings/commands" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "message": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+         }'
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "intent": "create_booking",
+    "message": "Booking confirmed for Wednesday at 02:00 PM with Mike Johnson (ID: 123e4567-e89b-12d3-a456-426614174000)",
+    "analysis": [
+      {
+        "intent": "create_booking",
+        "confidence": 0.92,
+        "assessment": "high"
+      },
+      {
+        "intent": "query_booking",
+        "confidence": 0.05,
+        "assessment": "low"
+      },
+      {
+        "intent": "cancel_booking",
+        "confidence": 0.03,
+        "assessment": "low"
+      },
+      {
+        "intent": "list_bookings",
+        "confidence": 0.00,
+        "assessment": "low"
+      }
+    ],
+    "booking": {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "technician_name": "Mike Johnson",
+      "profession": "Plumber",
+      "start_time": "2025-02-05T14:00:00Z",
+      "end_time": "2025-02-05T15:00:00Z"
+    },
+    "metadata": {
+      "processed_at": "2025-01-31T14:50:00Z",
+      "processing_time_ms": 150
+    }
+  },
+  "error": null,
+  "metadata": {}
+}
+```
+
+**Sample Response (Low Confidence):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "COMMAND_PROCESSING_FAILED",
+    "message": "Failed to process command",
+    "details": {
+      "original_command": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+    },
+    "timestamp": "2025-01-31T14:50:00Z"
+  },
+  "metadata": {}
+}
+```
+
+**Sample Response (Unknown Intent):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "COMMAND_PROCESSING_FAILED",
+    "message": "I couldn't understand that request. Could you please rephrase it?",
+    "details": {},
+    "timestamp": "2025-01-31T15:05:00Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 4. Cancel a Booking
+
+**Endpoint:**
+
+```
+DELETE /api/v1/bookings/{booking_id}
+```
+
+**Description:**
+
+Cancels an existing booking identified by `booking_id`.
+
+**cURL Command:**
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/bookings/123e4567-e89b-12d3-a456-426614174000" \
+     -H "Accept: application/json"
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "booking_id": "123e4567-e89b-12d3-a456-426614174000",
+    "status": "cancelled"
+  },
+  "error": null,
+  "metadata": {
+    "cancelled_at": "2025-01-31T14:45:00Z"
+  }
+}
+```
+
+**Sample Response (Booking Not Found):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "BOOKING_NOT_FOUND",
+    "message": "Booking 123e4567-e89b-12d3-a456-426614174000 not found",
+    "details": null,
+    "timestamp": "2025-01-31T14:45:00Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+### 5. Process a Natural Language Command
+
+**Endpoint:**
+
+```
+POST /api/v1/bookings/commands
+```
+
+**Description:**
+
+Processes a natural language command to perform booking operations such as creating, querying, or cancelling bookings.
+
+**Request Body:**
+
+```json
+{
+  "message": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+}
+```
+
+**cURL Command:**
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/bookings/commands" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "message": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+         }'
+```
+
+**Sample Response (Success):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "intent": "create_booking",
+    "message": "Booking confirmed for Wednesday at 2:00 PM with Mike Johnson (ID: 123e4567-e89b-12d3-a456-426614174000)",
+    "analysis": [
+      {
+        "intent": "create_booking",
+        "confidence": 0.92,
+        "assessment": "high"
+      },
+      {
+        "intent": "query_booking",
+        "confidence": 0.05,
+        "assessment": "low"
+      },
+      {
+        "intent": "cancel_booking",
+        "confidence": 0.03,
+        "assessment": "low"
+      },
+      {
+        "intent": "list_bookings",
+        "confidence": 0.00,
+        "assessment": "low"
+      }
+    ],
+    "booking": {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "customer_name": "Anonymous Customer",
+      "technician_name": "Mike Johnson",
+      "profession": "Plumber",
+      "start_time": "2025-02-05T14:00:00Z",
+      "end_time": "2025-02-05T15:00:00Z"
+    },
+    "metadata": {
+      "processed_at": "2025-01-31T14:50:00Z",
+      "processing_time_ms": 150
+    }
+  },
+  "error": null,
+  "metadata": {}
+}
+```
+
+**Sample Response (Low Confidence):**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "COMMAND_PROCESSING_FAILED",
+    "message": "Failed to process command",
+    "details": {
+      "original_command": "Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak."
+    },
+    "timestamp": "2025-01-31T14:50:00Z"
+  },
+  "metadata": {}
+}
+```
+
+---
+
+## CLI Usage Examples
+
+Welcome to the **Technician Booking System CLI**! This section provides detailed and professionally formatted examples on how to interact with the system using the Command-Line Interface (CLI). Leveraging the power of `typer` and `rich`, the CLI offers an intuitive and visually appealing experience for managing technician bookings directly from your terminal.
+
+---
+
+### Starting the CLI
+
+**Description:**
+
+Launches the Technician Booking System CLI, providing an interactive interface for managing bookings.
+
+**Command:**
+
+```bash
+poetry run python -m app.core.cli
+```
+
+**Sample Output:**
+
+```
+┌─────────────────────────────────────────────┐
+│          Technician Booking System          │
+│               v1.0 - January 2025           │
+└─────────────────────────────────────────────┘
+
+Enter command:
+```
+
+---
+
+### Available Commands
+
+The CLI provides the following primary commands:
+
+1. **List All Bookings**
+2. **Retrieve Booking Details**
+3. **Create a New Booking**
+4. **Cancel a Booking**
+5. **Process a Natural Language Command**
+6. **Exit the CLI**
+
+---
+
+### 1. List All Bookings
+
+**Description:**
+
+Retrieves and displays a list of all existing bookings in a structured and readable format.
+
+**Command:**
+
+```
+list all bookings
+```
+
+**Sample Output (Success):**
+
+```
+┌─────────────────────────────────────────────┐
+│                All Bookings                 │
+├─────────────────────────────────────────────┤
+│ Total Bookings: 5                           │
+├─────────────────────────────────────────────┤
+│ 1. ID: f0d55292-1d26-48ff-ae2f-e7a9838a5d60 │
+│    Technician: Nicolas Woollett             │
+│    Profession: Plumber                      │
+│    Start Time: 2022-10-15 10:00 AM          │
+├─────────────────────────────────────────────┤
+│ 2. ID: 07111419-edbf-4f0e-9c19-b93095eadef4 │
+│    Technician: Franky Flay                  │
+│    Profession: Electrician                  │
+│    Start Time: 2022-10-16 06:00 PM          │
+├─────────────────────────────────────────────┤
+│ 3. ID: 838d3646-855e-46e1-a1be-843f4ebb5f77 │
+│    Technician: Griselda Dickson             │
+│    Profession: Welder                       │
+│    Start Time: 2022-10-18 11:00 AM          │
+├─────────────────────────────────────────────┤
+│ 4. ID: 13806ace-540b-464f-8087-87b40c50b37f │
+│    Technician: John Do Alice Smith          │
+│    Profession: Plumber                      │
+│    Start Time: 2025-02-01 02:00 PM          │
+├─────────────────────────────────────────────┤
+│ 5. ID: 43919cc7-01db-4bee-a818-d08d0d01d7a0 │
+│    Technician: Karen                        │
+│    Profession: Electrician                  │
+│    Start Time: 2025-02-01 09:00 AM          │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (No Bookings Found):**
+
+```
+┌─────────────────────────────────────────────┐
+│                All Bookings                 │
+├─────────────────────────────────────────────┤
+│ Total Bookings: 0                           │
+├─────────────────────────────────────────────┤
+│ You have no bookings at the moment.         │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (Error):**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Failed to retrieve bookings. Please try again. 
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 2. Retrieve Booking Details
+
+**Description:**
+
+Fetches and displays detailed information about a specific booking using its unique `booking_id`.
+
+**Command:**
+
+```
+get booking details 87963f8a-9915-4e1d-9eda-629a3ae948dc
+```
+
+**Sample Output (Success):**
+
+```
+┌─────────────────────────────────────────────┐
+│            Booking Details                  │
+├─────────────────────────────────────────────┤
+│ Booking ID: 87963f8a-9915-4e1d-9eda-629a3ae948dc 
+│                                             │
+│ Technician: Alice Smith                     │
+│ Profession: Plumber                         │
+│ Start Time: 2025-02-01 02:00 PM             │
+│ End Time: 2025-02-01 03:00 PM               │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (Booking Not Found):**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Booking with ID 87963f8a-9915-4e1d-9eda-629a3ae948dc not found. 
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 3. Create a New Booking
+
+**Description:**
+
+Creates a new booking with the specified details using natural language commands.
+
+**Command Examples:**
+
+- **Plumber:**
+  
+  ```
+  Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak.
+  ```
+  
+- **Welder:**
+  
+  ```
+  Schedule welder James Brown for Friday at 10 AM for metal work.
+  ```
+  
+- **Electrician:**
+  
+  ```
+  I need electrician Bob Wilson on Monday at 9 AM.
+  ```
+  
+- **Carpenter:**
+  
+  ```
+  Book carpenter Emily White for Saturday at 3 PM to build a cabinet.
+  ```
+  
+- **Mechanic:**
+  
+  ```
+  Schedule mechanic Robert Miller on Tuesday at 5 PM for a car check.
+  ```
+  
+- **Painter:**
+  
+  ```
+  Book painter Lisa Davis for Thursday at 11 AM to repaint my living room.
+  ```
+  
+- **Chef:**
+  
+  ```
+  Schedule chef Daniel Martinez for Sunday at 7 PM for dinner.
+  ```
+  
+- **Gardener:**
+  
+  ```
+  Book gardener Nancy Clark for Friday at 8 AM for landscaping.
+  ```
+  
+- **Teacher:**
+  
+  ```
+  Schedule teacher Samuel Harris for Monday at 6 PM for tutoring.
+  ```
+  
+- **Developer:**
+  
+  ```
+  Book developer Laura Evans for Wednesday at 4 PM for a project.
+  ```
+  
+- **Nurse:**
+  
+  ```
+  Schedule nurse Kevin Adams for Saturday at 9 AM for home care.
+  ```
+
+**Sample Output (Success):**
+
+```
+┌─────────────────────────────────────────────┐
+│           Booking Created Successfully      │
+├─────────────────────────────────────────────┤
+│ ID: 13806ace-540b-464f-8087-87b40c50b37f    │
+│ Technician: John Do Alice Smith             │
+│ Profession: Plumber                         │
+│ Start Time: 2025-02-01 02:00 PM             │
+│ End Time: 2025-02-01 03:00 PM               │
+├─────────────────────────────────────────────┤
+│ Metadata:                                   │
+│ - Created At: 2025-01-31T14:40:00Z          │
+│ - Booking Duration: 1 hour                  │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (Validation Error - Missing Profession):**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Profession is required for booking creation.│
+│                                             │
+│ Provided Data:                              │
+│ - Technician: Alice Smith                   │
+│ - Start Time: 2025-02-01T14:00:00Z          │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (Validation Error - Invalid Start Time):**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Start time must be in the future.           │
+│                                             │
+│ Provided Data:                              │
+│ - Technician: Alice Smith                   │
+│ - Profession: Plumber                       │
+│ - Start Time: 2025-01-30T14:00:00Z          │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 4. Cancel a Booking
+
+**Description:**
+
+Cancels an existing booking identified by its unique `booking_id`.
+
+**Command:**
+
+```
+cancel booking 123e4567-e89b-12d3-a456-426614174000
+```
+
+**Sample Output (Success):**
+
+```
+┌─────────────────────────────────────────────┐
+│           Booking Cancelled Successfully    │
+├─────────────────────────────────────────────┤
+│ Booking ID: 123e4567-e89b-12d3-a456-426614174000 │
+│ Status: Cancelled                          │
+├─────────────────────────────────────────────┤
+│ Metadata:                                   │
+│ - Cancelled At: 2025-01-31T14:45:00Z        │
+└─────────────────────────────────────────────┘
+```
+
+**Sample Output (Booking Not Found):**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Booking with ID 123e4567-e89b-12d3-a456-426614174000 not found. │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 5. Process a Natural Language Command
+
+**Description:**
+
+Processes a natural language command to perform booking operations such as creating, querying, or cancelling bookings.
+
+**Command Examples:**
+
+- **Creating a Booking:**
+  
+  ```
+  Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak.
+  ```
+  
+- **Cancelling a Booking:**
+  
+  ```
+  Cancel booking 123e4567-e89b-12d3-a456-426614174000.
+  ```
+  
+- **Listing All Bookings:**
+  
+  ```
+  List all bookings.
+  ```
+  
+- **Creating Another Booking:**
+  
+  ```
+  I need electrician Bob Wilson on Monday at 9 AM.
+  ```
+
+**Sample Output (Success - Creating a Booking):**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak.                │
+│                                                                                      │
+│ NLP Analysis [dim](max: 0.92, avg: 0.28)                                             │
+│  Intent          ┃   Conf ┃ Analysis                                                 │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                       │
+│ create_booking  │  0.92  │ ███████████████▒▒▒▒                                       │
+│ query_booking   │  0.05  │ ███▒▒▒▒▒▒▒▒▒▒▒▒                                           │
+│ cancel_booking  │  0.03  │ █▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                          │
+│ list_bookings   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                           │
+│                                                                                      │
+│ Response: Booking confirmed for Wednesday at 02:00 PM with Mike Johnson (ID: 123e4567-e89b-12d3-a456-426614174000)                                
+╰───────────────────────────────────────────────────────────────────────────────────────── 12:02:18 ─────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Sample Output (Success - Listing All Bookings):**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: List all bookings                                                                                                                                         
+│                                                                                                                                                           │
+│ NLP Analysis [dim](max: 1.00, avg: 0.25)                                                                                                                                     │
+│  Intent          ┃   Conf                                                             ┃ Analysis                                                                                                                                │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                                                                                                     │
+│ list_bookings   │  1.00  │ ███████████████                                                                                                                         │
+│ create_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│ cancel_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│ query_booking   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│                                                                                                                                                                   │
+│ Response: Here are all your bookings:                                                                                                                               │
+│ - ID: f0d55292-1d26-48ff-ae2f-e7a9838a5d60, Technician: Nicolas Woollett, Profession: Plumber, Start: 2022-10-15 10:00 AM                                            │
+│ - ID: 07111419-edbf-4f0e-9c19-b93095eadef4, Technician: Franky Flay, Profession: Electrician, Start: 2022-10-16 06:00 PM                                            │
+│ - ID: 838d3646-855e-46e1-a1be-843f4ebb5f77, Technician: Griselda Dickson, Profession: Welder, Start: 2022-10-18 11:00 AM                                            │
+│ - ID: 13806ace-540b-464f-8087-87b40c50b37f, Technician: John Do Alice Smith, Profession: Plumber, Start: 2025-02-01 02:00 PM                                            │
+│ - ID: 43919cc7-01db-4bee-a818-d08d0d01d7a0, Technician: Karen, Profession: Electrician, Start: 2025-02-01 09:00 AM                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────── 12:02:39 ─────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Sample Output (Success - Creating a Booking without Customer):**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: I'm Karen and I want to book an Electrician for tomorrow                                                                                             │
+│                                                                                                                                              │
+│ NLP Analysis [dim](max: 1.00, avg: 0.25)                                                                                                     │
+│  Intent          ┃   Conf ┃ Analysis                                                                                                         │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                                                                               │
+│ create_booking  │  1.00  │ ███████████████                                                                                                   │
+│ cancel_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                   │
+│ query_booking   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                   │
+│ list_bookings   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                   │
+│                                                                                                                                              │
+│ Response: Booking confirmed for Saturday at 09:00 AM with Karen (ID: 43919cc7-01db-4bee-a818-d08d0d01d7a0)                                                    │
+╰───────────────────────────────────────────────────────────────────────────────────────── 12:03:37 ─────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Sample Output (Error - Fuzzy Parsing Failed):**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: List all bookings                                                                                                                                        │
+│                                                                                                                                                                   │
+│ NLP Analysis [dim](max: 1.00, avg: 0.25)                                                                                                                                             │
+│  Intent          ┃   Conf ┃ Analysis                                                                                                                                        │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                                                                                                     │
+│ list_bookings   │  1.00  │ ███████████████                                                                                                                         │
+│ create_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│ cancel_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│ query_booking   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                                                                                         │
+│                                                                                                                                                                   │
+│ Response: Here are all your bookings:                                                                                                                               │
+│ - ID: f0d55292-1d26-48ff-ae2f-e7a9838a5d60, Technician: Nicolas Woollett, Profession: Plumber, Start: 2022-10-15 10:00 AM                                            │
+│ - ID: 07111419-edbf-4f0e-9c19-b93095eadef4, Technician: Franky Flay, Profession: Electrician, Start: 2022-10-16 06:00 PM                                            │
+│ - ID: 838d3646-855e-46e1-a1be-843f4ebb5f77, Technician: Griselda Dickson, Profession: Welder, Start: 2022-10-18 11:00 AM                                            │
+│ - ID: 13806ace-540b-464f-8087-87b40c50b37f, Technician: John Do Alice Smith, Profession: Plumber, Start: 2025-02-01 02:00 PM                                            │
+│ - ID: 43919cc7-01db-4bee-a818-d08d0d01d7a0, Technician: Karen, Profession: Electrician, Start: 2025-02-01 09:00 AM                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────── 12:03:47 ─────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+---
+
+### 6. Exit the CLI
+
+**Description:**
+
+Gracefully terminates the CLI session.
+
+**Command:**
+
+```
+exit
+```
+
+**Sample Output:**
+
+```
+┌─────────────────────────────────────────────┐
+│                Goodbye!                     │
+├─────────────────────────────────────────────┤
+│ Thank you for using the Technician Booking  │
+│ System. Have a great day!                   │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Additional Examples
+
+To further illustrate the capabilities of the **Technician Booking System CLI**, here are more examples covering various scenarios:
+
+### Example 1: Creating a Booking with Missing Information
+
+**Command:**
+
+```
+create booking --technician "Bob Builder" --start_time "2025-02-05T10:00:00Z"
+```
+
+**Sample Output:**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Profession is required for booking creation.│
+│                                             │
+│ Provided Data:                              │
+│ - Technician: Bob Builder                   │
+│ - Start Time: 2025-02-05T10:00:00Z          │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### Example 2: Processing a Command with Multiple Intents
+
+**Command:**
+
+```
+process command "Book electrician Jane Doe for next Monday at 9 AM and then list all bookings."
+```
+
+**Sample Output:**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: Book electrician Jane Doe for next Monday at 9 AM and then list all bookings. │
+│                                                                                      │
+│ NLP Analysis [dim](max: 0.85, avg: 0.35)                                             │
+│  Intent          ┃   Conf ┃ Analysis                                                 │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                       │
+│ create_booking  │  0.85  │ ██████████████▒▒▒▒                                        │
+│ list_bookings   │  0.15  │ █████▒▒▒▒▒▒▒▒▒▒▒▒▒                                        │
+│ cancel_booking  │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                           │
+│ query_booking   │  0.00  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                           │
+│                                                                                      │
+│ Response: Booking confirmed for next Monday at 09:00 AM with Jane Doe (ID: 223e4567-e89b-12d3-a456-426614174001)
+│                                             │
+│ Metadata:                                   │
+│ - Processed At: 2025-01-31T15:00:00Z        │
+│ - Processing Time: 170ms                    │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### Example 3: Cancelling a Non-Existent Booking
+
+**Command:**
+
+```
+cancel booking 00000000-0000-0000-0000-000000000000
+```
+
+**Sample Output:**
+
+```
+┌─────────────────────────────────────────────┐
+│                Error:                       │
+├─────────────────────────────────────────────┤
+│ Booking with ID 00000000-0000-0000-0000-000000000000 not found. 
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### Example 4: Processing an Unknown Command
+
+**Command:**
+
+```
+process command "Tell me a joke."
+```
+
+**Sample Output:**
+
+```
+╭─────────────────────────────────────────────────────────────────────────────────────── NLP Analysis ───────────────────────────────────────────────────────────────────────────────────────╮
+│ Input: Tell me a joke.                                                               │
+│                                                                                      │
+│ NLP Analysis [dim](max: 0.10, avg: 0.10)                                             │
+│  Intent          ┃   Conf ┃ Analysis                                                 │
+│ ━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━                                       │
+│ create_booking  │  0.10  │ ████▒▒▒▒▒▒▒▒▒▒▒▒▒                                         │
+│ query_booking   │  0.10  │ ████▒▒▒▒▒▒▒▒▒▒▒▒▒                                         │
+│ cancel_booking  │  0.10  │ ████▒▒▒▒▒▒▒▒▒▒▒▒▒                                         │
+│ list_bookings   │  0.10  │ ████▒▒▒▒▒▒▒▒▒▒▒▒▒                                         │
+│                                                                                      │
+│ Response: I'm sorry, I didn't understand that request. Could you please rephrase it? │
+│                                                                                      │
+│ Metadata:                                                                            │
+│ - Processed At: 2025-01-31T15:05:00Z                                                 │
+│ - Processing Time: 160ms                    │                                        │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Notes
+
+- **Starting the CLI:** Always start the CLI using the command `poetry run python -m app.core.cli` to ensure it runs within the correct virtual environment and with all dependencies loaded.
+
+- **Command Syntax:** Commands must be entered in specific formats to be recognized and processed correctly:
+  
+  - **List All Bookings:**
+    ```
+    list all bookings
+    ```
+  
+  - **Retrieve Booking Details:**
+    ```
+    get booking details <booking_id>
+    ```
+  
+  - **Create a New Booking:** Use natural language commands without requiring flags.
+    - **Example:**
+      ```
+      Book plumber Mike Johnson for Wednesday at 2 PM to fix a leak.
+      ```
+      ```
+      Schedule welder James Brown for Friday at 10 AM for metal work.
+      ```
+      ```
+      I need electrician Bob Wilson on Monday at 9 AM.
+      ```
+  
+  - **Cancel a Booking:**
+    ```
+    cancel booking <booking_id>
+    ```
+  
+  - **Process a Natural Language Command:**
+    ```
+    process command "<Natural Language Command>"
+    ```
+    *Example:*
+    ```
+    process command "Book carpenter Emily White for Saturday at 3 PM to build a cabinet."
+    ```
+  
+  - **Exit the CLI:**
+    ```
+    exit
+    ```
+    *Alternatively:*
+    ```
+    quit
+    ```
+    or
+    ```
+    q
+    ```
+
+- **Booking IDs:** Ensure that the `booking_id` used in the commands corresponds to an existing booking in your system. Booking IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+
+- **Date and Time Formats:** Use natural language expressions for date and time (e.g., "tomorrow", "next Monday at 9 AM") to leverage the NLP capabilities of the CLI.
+
+- **Error Handling:** The CLI provides detailed error messages with clear descriptions and metadata to assist in troubleshooting.
+
+- **Metadata Information:** Each successful command includes metadata such as timestamps and processing times to provide context and facilitate monitoring.
+
+- **Interactive Feedback:** The CLI leverages `rich` to present information in well-formatted panels, tables, and colored text for enhanced readability and user experience.
+
+- **Natural Language Processing:** When using the `process command` feature, ensure that the natural language input is clear and contains necessary information to perform the desired action. The NLP service analyzes the intent and entities to execute commands accurately.
+
+---
 
 ## Testing
 
